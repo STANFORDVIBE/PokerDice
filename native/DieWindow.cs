@@ -27,8 +27,18 @@ sealed unsafe class DieWindow : Form
     int[] nums = new int[6];
     int? result;
     M3 orient = DieRenderer.VIEW, shown = DieRenderer.VIEW;
-    double hop;
-    (V3 axis, double angle, M3 end, double t0)? anim;
+    double hop, slide;
+    public enum Throw { Spin, Tumble, Top, Roll }   // кручение, кувырок, волчок, перекат
+    struct Anim
+    {
+        public Throw Kind;
+        public V3 Axis, Axis2;                      // главный поворот к выпавшей грани и второй — для кувырка
+        public double Angle, Angle2, T0;
+        public M3 End;
+        public double Dir, Amp;                     // перекат: в какую сторону и насколько
+    }
+    Anim? anim;
+    Throw? lastThrow;
     double popT0 = -1;                              // когда начала «выпрыгивать» подсказка
     bool verdictUp;                                 // подсказка над кубиком (снизу нет места до края экрана)
     MenuWindow menu;
@@ -120,7 +130,7 @@ sealed unsafe class DieWindow : Form
     void Frame()
     {
         buf.Pixels.Clear();
-        renderer.Render((uint*)buf.Bits, buf.Width, buf.Height, DieRenderer.SIZE * scale * Dpi, shown, hop);
+        renderer.Render((uint*)buf.Bits, buf.Width, buf.Height, DieRenderer.SIZE * scale * Dpi, shown, hop, slide);
         DrawVerdict();
         Present();
     }
@@ -211,7 +221,19 @@ sealed unsafe class DieWindow : Form
     }
 
     // ---------- бросок ----------
-    public void Roll()
+    // каждый раз случайно, но не два одинаковых подряд
+    public void Roll() => Roll(PickThrow());
+
+    Throw PickThrow()
+    {
+        var all = Enum.GetValues<Throw>().Where(k => k != lastThrow && (k != Throw.Roll || RollAmp() >= 0.35)).ToArray();
+        return all[Rng.Next(all.Length)];
+    }
+
+    // насколько далеко можно откатиться вбок, не вылезая из окна (в рёбрах кубика)
+    double RollAmp() => Math.Clamp(WIN_W / 2.0 / (DieRenderer.SIZE * scale) - 1.0, 0, 1.1);
+
+    public void Roll(Throw kind)
     {
         if (anim != null) return;
         menu?.Close();
@@ -220,13 +242,66 @@ sealed unsafe class DieWindow : Form
         for (int i = 0; i < 6; i++) nums[i] = i == face ? result.Value : Rng.Roll100();
         renderer.SetNumbers(nums);
 
-        // из текущего положения в целевое вокруг одной оси + пара полных оборотов
+        // из текущего положения в целевое вокруг одной оси (+ полные обороты — они не меняют, где кончим)
         var end = DieRenderer.TO_FRONT[face];
         var (axis, angle) = (DieRenderer.VIEW.T * orient * end.T).AxisAngle();
-        angle += 2 * Math.PI * TURNS * (Rng.Next(2) == 1 ? 1 : -1);
-        anim = (axis, angle, end, clock.Elapsed.TotalMilliseconds);
+        double sign = Rng.Next(2) == 1 ? 1 : -1;
+        var a = new Anim { Kind = kind, Axis = axis, Angle = angle, End = end, T0 = clock.Elapsed.TotalMilliseconds };
+        switch (kind)
+        {
+            case Throw.Spin:
+                a.Angle += 2 * Math.PI * TURNS * sign;
+                break;
+            case Throw.Tumble:                       // второй оборот — вокруг случайной оси поперёк первой
+                a.Angle += 2 * Math.PI * sign;
+                var across = V3.Cross(axis, new V3(0.3, 1, 0.2)).Norm();
+                a.Axis2 = M3.RotAxis(axis, Rng.Next(360) * Math.PI / 180) * across;
+                a.Angle2 = 2 * Math.PI * (Rng.Next(2) == 1 ? 1 : -1);
+                break;
+            case Throw.Top:
+                a.Angle2 = 2 * Math.PI * 3 * sign;
+                break;
+            case Throw.Roll:                         // откатываемся туда, где на экране больше места
+                var wa = Screen.FromPoint(center).WorkingArea;
+                a.Dir = center.X < wa.X + wa.Width / 2 ? 1 : -1;
+                a.Amp = RollAmp();
+                break;
+        }
+        anim = a;
+        lastThrow = kind;
         popT0 = -1;
         timer.Start();
+    }
+
+    // положение кубика на доле t (0..1) броска: поворот, высота прыжка, сдвиг вбок
+    void Pose(Anim a, double t)
+    {
+        static double Out(double x, double p) => 1 - Math.Pow(1 - Math.Clamp(x, 0, 1), p);
+        var view = DieRenderer.VIEW;
+        slide = 0;
+        switch (a.Kind)
+        {
+            case Throw.Spin:                         // кручение с подскоками
+                shown = view * M3.RotAxis(a.Axis, a.Angle * (1 - Out(t, 3))) * a.End;
+                hop = Math.Abs(Math.Sin(Math.PI * 2.5 * t)) * Math.Pow(1 - t, 1.3);
+                break;
+            case Throw.Tumble:                       // высокий подброс, кувырки через две оси, пара отскоков
+                shown = view * M3.RotAxis(a.Axis, a.Angle * (1 - Out(t, 2.4))) * M3.RotAxis(a.Axis2, a.Angle2 * (1 - Out(t, 3.5))) * a.End;
+                hop = t < 0.5 ? Math.Sin(2 * Math.PI * t) : 0.5 * Math.Abs(Math.Sin(4 * Math.PI * (t - 0.5))) * (1 - t);
+                break;
+            case Throw.Top:                          // волчок: крутится на углу вокруг вертикали и заваливается на грань
+                shown = view * M3.RotY(a.Angle2 * (1 - Out(t, 2))) * M3.RotAxis(a.Axis, a.Angle * (1 - Out(t, 1.6))) * a.End;
+                hop = t < 0.25 ? 0.4 * Math.Sin(4 * Math.PI * t) : t > 0.8 ? 0.1 * Math.Sin(5 * Math.PI * (t - 0.8)) : 0;
+                break;
+            case Throw.Roll:                         // отлетает вбок и катится обратно по столу
+                slide = a.Amp * a.Dir * (t < 0.35 ? Math.Sin(Math.PI / 2 * t / 0.35) : 1 - Out((t - 0.35) / 0.65, 2.5));
+                var tilt = DieRenderer.TILT;
+                shown = tilt * M3.RotAxis(new V3(0, 0, 1), -slide / 0.5) * tilt.T * view * M3.RotAxis(a.Axis, a.Angle * (1 - Out(t / 0.45, 3))) * a.End;
+                hop = t < 0.35 ? 0.7 * Math.Sin(Math.PI * t / 0.35) : t < 0.5 ? 0.12 * Math.Sin(Math.PI * (t - 0.35) / 0.15) : 0;
+                break;
+        }
+        // крупный кубик не должен выпрыгивать из окна
+        hop *= Math.Clamp((WIN_H / 2.0 / (DieRenderer.SIZE * scale) - 0.95) / 0.44, 0.3, 1);
     }
 
     void Tick()
@@ -235,10 +310,9 @@ sealed unsafe class DieWindow : Form
         bool popDone = false;
         if (anim is { } a)
         {
-            double t = Math.Min(1, (now - a.t0) / DURATION), e = 1 - Math.Pow(1 - t, 3);
-            shown = DieRenderer.VIEW * M3.RotAxis(a.axis, a.angle * (1 - e)) * a.end;
-            hop = Math.Abs(Math.Sin(Math.PI * 2.5 * t)) * Math.Pow(1 - t, 1.3);
-            if (t >= 1) { orient = shown; hop = 0; anim = null; popT0 = now; }
+            double t = Math.Min(1, (now - a.T0) / DURATION);
+            Pose(a, t);
+            if (t >= 1) { orient = shown; hop = 0; slide = 0; anim = null; popT0 = now; }
         }
         // масштаб: колёсико задаёт цель, кубик плавно доезжает до неё
         if (scale != Prefs.Scale)
@@ -339,6 +413,25 @@ sealed unsafe class DieWindow : Form
         double ms = sw.Elapsed.TotalMilliseconds / frames;
         hop = 0;
         return ms;
+    }
+
+    // раскадровка броска: кадры по ходу анимации в одну ленту (в половину размера)
+    public Bitmap Filmstrip(Throw kind, int frames)
+    {
+        Roll(kind);
+        var a = anim.Value;
+        int fw = buf.Width / 2, fh = buf.Height / 2;
+        var strip = new Bitmap(fw * frames, fh);
+        using (var g = Graphics.FromImage(strip))
+            for (int i = 0; i < frames; i++)
+            {
+                Pose(a, (i + 0.5) / frames);
+                Frame();
+                g.DrawImage(bufBmp, i * fw, 0, fw, fh);
+            }
+        Pose(a, 1);
+        orient = shown; hop = slide = 0; anim = null;
+        return strip;
     }
 
     // кубик крупным планом на масштабе s с одними и теми же числами: проверить, как читаются цифры

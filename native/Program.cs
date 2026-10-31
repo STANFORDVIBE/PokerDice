@@ -43,6 +43,12 @@ static class Program
             die.Snapshot(false).Save(Path.Combine(dir, st.Id + ".png"));
             foreach (var s in new[] { 0.5, 0.7, 1.0, 2.5 }) die.Closeup(s).Save(Path.Combine(dir, $"{st.Id}-{s * 100}.png"));
         }
+        foreach (var s in new[] { 1.0, 2.5 })
+        {
+            die.Closeup(s);
+            foreach (var kind in Enum.GetValues<DieWindow.Throw>())
+                die.Filmstrip(kind, 8).Save(Path.Combine(dir, $"throw-{kind}-{s * 100}.png"));
+        }
         for (int i = 0; i < 2; i++)
         {
             sw.Restart();
