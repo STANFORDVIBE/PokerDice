@@ -7,10 +7,9 @@ namespace PokerDice;
 
 sealed class MenuWindow : Form
 {
-    // размеры в логических пикселях; панель 214×352, вокруг поля под тень 0 6px 18px
-    const float W = 214, H = 352, ML = 18, MT = 12, MR = 18, MB = 24;
-    const float IN_X = 15, IN_W = 184;                 // ширина содержимого блоков с ползунком и стилями
-    static readonly int[] PRESETS = { 25, 33, 50, 66, 75 };
+    // размеры в логических пикселях; панель 214×202, вокруг поля под тень 0 6px 18px
+    const float W = 214, H = 202, ML = 18, MT = 12, MR = 18, MB = 24;
+    const float IN_X = 15, IN_W = 184;                 // ширина блока со стилями
 
     readonly DieWindow die;
     readonly double dpi;
@@ -21,14 +20,10 @@ sealed class MenuWindow : Form
     readonly long openedAt = Environment.TickCount64;
     readonly Point pos;
     string hover, pressed;
-    bool sliding;
 
     // где что лежит (от левого верхнего угла панели)
-    static readonly RectangleF Slider = new(IN_X, 40, IN_W, 16);
-    static RectangleF Preset(int i) { float w = (IN_W - 4 * 4) / 5; return new(IN_X + i * (w + 4), 64, w, 21); }
-    static RectangleF Swatch(int i) => new(IN_X + i * 39, 157, 32, 32);
-    static readonly RectangleF ItemVerdict = new(7, 206, 200, 31), ItemTop = new(7, 239, 200, 31),
-        ItemAuto = new(7, 272, 200, 31), ItemClose = new(7, 314, 200, 31);
+    static RectangleF Swatch(int i) => new(IN_X + i * 39, 40, 32, 32);
+    static readonly RectangleF ItemTop = new(7, 89, 200, 31), ItemAuto = new(7, 122, 200, 31), ItemClose = new(7, 164, 200, 31);
 
     public MenuWindow(DieWindow die, Point at)
     {
@@ -120,37 +115,11 @@ sealed class MenuWindow : Form
             using var ui = new Font(Fonts.Ui, 13, GraphicsUnit.Pixel);
             using var uiSemi = new Font(Fonts.UiSemibold, 13, GraphicsUnit.Pixel);
             using var small = new Font(Fonts.Ui, 11, GraphicsUnit.Pixel);
-            using var big = new Font(Fonts.Num, 16, GraphicsUnit.Pixel);
-            using var num11 = new Font(Fonts.Num, 11, GraphicsUnit.Pixel);
             using var num15 = new Font(Fonts.Num, 15, GraphicsUnit.Pixel);
 
-            // частота рейза
-            DrawText(g, "Частота рейза", ui, Palette.Text, new RectangleF(IN_X, 15, IN_W, 17));
-            DrawText(g, p.Freq + "%", big, Palette.Gold, new RectangleF(IN_X, 15, IN_W, 17), StringAlignment.Far);
-            float trackY = Slider.Y + Slider.Height / 2;
-            using (var t = Shapes.Round(new RectangleF(IN_X, trackY - 2, IN_W, 4), 2)) using (var b = new SolidBrush(Color.FromArgb(36, 255, 255, 255))) g.FillPath(b, t);
-            if (p.Freq > 0)
-                using (var t = Shapes.Round(new RectangleF(IN_X, trackY - 2, IN_W * p.Freq / 100f, 4), 2)) using (var b = new SolidBrush(Palette.Gold)) g.FillPath(b, t);
-            float thumb = IN_X + 7 + (IN_W - 14) * p.Freq / 100f;
-            using (var b = new SolidBrush(Palette.Text)) g.FillEllipse(b, thumb - 7, trackY - 7, 14, 14);
-            using (var pen = new Pen(Palette.Gold, 2)) g.DrawEllipse(pen, thumb - 6, trackY - 6, 12, 12);
-
-            for (int i = 0; i < PRESETS.Length; i++)
-            {
-                var r = Preset(i);
-                bool on = PRESETS[i] == p.Freq, hot = hover == "p" + i;
-                using var shape = Shapes.Round(RectangleF.Inflate(r, -0.5f, -0.5f), 6);
-                if (hot) using (var b = new SolidBrush(Palette.Hover)) g.FillPath(b, shape);
-                using (var pen = new Pen(on ? Palette.Gold : Palette.PanelLine, 1)) g.DrawPath(pen, shape);
-                DrawText(g, PRESETS[i].ToString(), num11, on ? Palette.Gold : hot ? Palette.Text : Palette.Muted, r, StringAlignment.Center);
-            }
-            string split = p.Freq <= 0 ? "Рейз никогда" : p.Freq >= 100 ? "Рейз всегда" : $"Рейз, если выпало 1–{p.Freq}";
-            DrawText(g, split, small, Palette.Muted, new RectangleF(IN_X, 93, IN_W, 14));
-            Sep(g, 118);
-
             // стиль кубика
-            DrawText(g, "Стиль кубика", ui, Palette.Text, new RectangleF(IN_X, 132, IN_W, 17));
-            DrawText(g, die.Style.Name, uiSemi, Palette.Gold, new RectangleF(IN_X, 132, IN_W, 17), StringAlignment.Far);
+            DrawText(g, "Стиль кубика", ui, Palette.Text, new RectangleF(IN_X, 15, IN_W, 17));
+            DrawText(g, die.Style.Name, uiSemi, Palette.Gold, new RectangleF(IN_X, 15, IN_W, 17), StringAlignment.Far);
             for (int i = 0; i < DieRenderer.Styles.Length; i++)
             {
                 var s = DieRenderer.Styles[i];
@@ -173,12 +142,11 @@ sealed class MenuWindow : Form
                 if (s.Id == p.Style)
                     using (var pen = new Pen(Palette.Gold, 2)) using (var border = Shapes.Round(RectangleF.Inflate(r, -1, -1), 8)) g.DrawPath(pen, border);
             }
-            Sep(g, 200);
+            Sep(g, 83);
 
-            Item(g, ItemVerdict, "verdict", "Показывать рейз/фолд", ui, p.Verdict);
             Item(g, ItemTop, "top", "Поверх всех окон", ui, p.OnTop);
             Item(g, ItemAuto, "auto", "Автобросок", ui, die.Auto);
-            Sep(g, 308);
+            Sep(g, 158);
             Item(g, ItemClose, "close", "Закрыть", ui, null);
             DrawText(g, "Esc×2", small, Palette.Muted, new RectangleF(ItemClose.X + 8, ItemClose.Y, ItemClose.Width - 16, ItemClose.Height), StringAlignment.Far);
         }
@@ -228,23 +196,16 @@ sealed class MenuWindow : Form
 
     string Hit(PointF p)
     {
-        if (RectangleF.Inflate(Slider, 0, 4).Contains(p)) return "slider";
-        for (int i = 0; i < PRESETS.Length; i++) if (Preset(i).Contains(p)) return "p" + i;
         for (int i = 0; i < DieRenderer.Styles.Length; i++) if (Swatch(i).Contains(p)) return "s" + i;
-        if (ItemVerdict.Contains(p)) return "verdict";
         if (ItemTop.Contains(p)) return "top";
         if (ItemAuto.Contains(p)) return "auto";
         if (ItemClose.Contains(p)) return "close";
         return null;
     }
 
-    void Slide(PointF p) => die.SetFreq((int)Math.Round(Math.Clamp((p.X - IN_X - 7) / (IN_W - 14), 0, 1) * 100));
-
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        var p = Logical(e.Location);
-        if (sliding) { Slide(p); Draw(); return; }
-        var h = Hit(p);
+        var h = Hit(Logical(e.Location));
         if (h != hover) { hover = h; Cursor = h == null ? Cursors.Default : Cursors.Hand; Draw(); }
     }
 
@@ -256,19 +217,16 @@ sealed class MenuWindow : Form
         if (!new RectangleF(0, 0, W, H).Contains(p)) { Close(); return; }   // клик по тени — мимо меню
         if (e.Button != MouseButtons.Left) return;
         pressed = Hit(p);
-        if (pressed == "slider") { sliding = true; Slide(p); Draw(); }
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left) return;
         var h = Hit(Logical(e.Location));
-        bool click = !sliding && h != null && h == pressed;
-        sliding = false; pressed = null;
+        bool click = h != null && h == pressed;
+        pressed = null;
         if (!click) return;
-        if (h[0] == 'p' && h.Length == 2) die.SetFreq(PRESETS[h[1] - '0']);
-        else if (h[0] == 's' && h.Length == 2) die.SetStyle(DieRenderer.Styles[h[1] - '0'].Id);
-        else if (h == "verdict") die.ToggleVerdict();
+        if (h[0] == 's' && h.Length == 2) die.SetStyle(DieRenderer.Styles[h[1] - '0'].Id);
         else if (h == "top") die.ToggleOnTop();
         else if (h == "auto")
         {
@@ -281,8 +239,6 @@ sealed class MenuWindow : Form
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.KeyCode == Keys.Escape) { Close(); return; }
-        int step = e.KeyCode is Keys.Right or Keys.Up ? 1 : e.KeyCode is Keys.Left or Keys.Down ? -1 : 0;
-        if (step != 0) { die.SetFreq(die.Prefs.Freq + step); Draw(); }
+        if (e.KeyCode == Keys.Escape) Close();
     }
 }

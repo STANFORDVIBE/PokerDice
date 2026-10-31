@@ -5,10 +5,8 @@ namespace PokerDice;
 
 sealed class Prefs
 {
-    public int Freq { get; set; } = 50;
     public double Scale { get; set; } = 1;
     public string Style { get; set; } = "classic";
-    public bool Verdict { get; set; } = true;
     public bool OnTop { get; set; }
     public int? Cx { get; set; }              // центр кубика на экране
     public int? Cy { get; set; }
@@ -30,7 +28,6 @@ sealed class Prefs
             p.Cy = (int)doc.RootElement.GetProperty("cy").GetDouble();
         }
         catch { }
-        p.Freq = Math.Clamp(p.Freq, 0, 100);
         p.Scale = Math.Round(Math.Clamp(p.Scale, 0.5, 2.5), 1);
         if (DieRenderer.Styles.All(s => s.Id != p.Style)) p.Style = "classic";
         return p;

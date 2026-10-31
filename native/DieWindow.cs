@@ -40,8 +40,6 @@ sealed unsafe class DieWindow : Form
     }
     Anim? anim;
     Throw? lastThrow;
-    double popT0 = -1;                              // когда начала «выпрыгивать» подсказка
-    bool verdictUp;                                 // подсказка над кубиком (снизу нет места до края экрана)
     MenuWindow menu;
     public long MenuClosedAt;                       // клик по кубику, закрывший меню, не бросает
     public bool Auto { get; private set; }          // автобросок: бросок за броском, пока не остановят
@@ -135,7 +133,6 @@ sealed unsafe class DieWindow : Form
     {
         buf.Pixels.Clear();
         renderer.Render((uint*)buf.Bits, buf.Width, buf.Height, DieRenderer.SIZE * scale * Dpi, shown, hop);
-        DrawVerdict();
         Present();
     }
 
@@ -148,80 +145,8 @@ sealed unsafe class DieWindow : Form
         int r = (int)Math.Ceiling(RADIUS * Prefs.Scale * Dpi);
         center = new Point(Math.Clamp(p.X, wa.Left + r, Math.Max(wa.Left + r, wa.Right - r)),
                            Math.Clamp(p.Y, wa.Top + r, Math.Max(wa.Top + r, wa.Bottom - r)));
-        bool up = center.Y + (124 * scale + 4) * Dpi > wa.Bottom;
-        if (redraw || (up != verdictUp && VerdictVisible)) { verdictUp = up; Frame(); }
-        else { verdictUp = up; Present(); }
-    }
-
-    // ---------- подсказка рейз/фолд под кубиком (растёт вместе с ним) ----------
-    bool VerdictVisible => result != null && anim == null && Prefs.Verdict;
-
-    void DrawVerdict()
-    {
-        if (!VerdictVisible) return;
-        bool raise = result <= Prefs.Freq;
-        string text = raise ? "РЕЙЗ" : "ФОЛД";
-        float s = (float)(scale * Dpi), fs = (float)(Math.Max(10, 12 * scale) * Dpi);
-        float pop = 1;
-        if (popT0 >= 0) pop = (float)CubicBezier(0.2, 1.6, 0.4, 1, Math.Min(1, (clock.Elapsed.TotalMilliseconds - popT0) / 300));
-
-        using var g = Graphics.FromImage(bufBmp);
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = new GraphicsPath();
-        using var font = new Font(Fonts.Ui, fs, FontStyle.Bold, GraphicsUnit.Pixel);
-        float x = 0;
-        foreach (var ch in text)                   // разрядка .2em
-        {
-            path.AddString(ch.ToString(), Fonts.Ui, (int)FontStyle.Bold, fs, new PointF(x, 0), StringFormat.GenericTypographic);
-            x += g.MeasureString(ch.ToString(), font, PointF.Empty, StringFormat.GenericTypographic).Width + 0.2f * fs;
-        }
-        float w = 14 * s + x + 12 * s, h = fs + 14 * s;
-        float cx = buf.Width / 2f, off = 124 * s;
-        float top = verdictUp ? buf.Height / 2f - off : buf.Height / 2f + off - h;
-        var pill = new RectangleF(cx - w / 2, top, w, h);
-        var tb = path.GetBounds();
-        using (var mt = new Matrix())
-        {
-            mt.Translate(pill.X + 14 * s - tb.X + (x - 0.2f * fs - tb.Width) / 2, pill.Y + h / 2 - (tb.Y + tb.Height / 2));
-            path.Transform(mt);
-        }
-
-        g.TranslateTransform(cx, top + h / 2);    // «выпрыгивание» из центра плашки
-        g.ScaleTransform(0.6f + 0.4f * pop, 0.6f + 0.4f * pop);
-        g.TranslateTransform(-cx, -(top + h / 2));
-        int A(double a) => (int)Math.Round(Math.Clamp(a * Math.Clamp(pop, 0, 1), 0, 1) * 255);
-
-        for (int i = 4; i >= 1; i--)               // мягкая тень 0 2px 8px
-        {
-            var r = RectangleF.Inflate(pill, i * 1.5f * (float)Dpi, i * 1.5f * (float)Dpi);
-            r.Offset(0, 2 * (float)Dpi);
-            using var sp = Shapes.Round(r, r.Height / 2);
-            using var sb = new SolidBrush(Color.FromArgb(A(0.035), 0, 0, 0));
-            g.FillPath(sb, sp);
-        }
-        using (var ring = Shapes.Round(RectangleF.Inflate(pill, (float)Dpi, (float)Dpi), h / 2 + (float)Dpi))
-        using (var rb = new SolidBrush(Color.FromArgb(A(0.1), 0, 0, 0)))
-            g.FillPath(rb, ring);
-        var bg = raise ? Palette.Gold : Palette.Die;
-        using (var pp = Shapes.Round(pill, h / 2))
-        using (var bb = new SolidBrush(Color.FromArgb(A(1), bg)))
-            g.FillPath(bb, pp);
-        using (var tbr = new SolidBrush(Color.FromArgb(A(1), Palette.Ink)))
-            g.FillPath(tbr, path);
-    }
-
-    static double CubicBezier(double x1, double y1, double x2, double y2, double x)
-    {
-        static double B(double a, double b, double t) => 3 * a * (1 - t) * (1 - t) * t + 3 * b * (1 - t) * t * t + t * t * t;
-        static double D(double a, double b, double t) => 3 * a * (1 - t) * (1 - t) + 6 * (b - a) * (1 - t) * t + 3 * (1 - b) * t * t;
-        double t = x;
-        for (int i = 0; i < 8; i++)
-        {
-            double d = D(x1, x2, t);
-            if (Math.Abs(d) < 1e-6) break;
-            t = Math.Clamp(t - (B(x1, x2, t) - x) / d, 0, 1);
-        }
-        return B(y1, y2, t);
+        if (redraw) Frame();
+        else Present();
     }
 
     // ---------- бросок ----------
@@ -292,7 +217,6 @@ sealed unsafe class DieWindow : Form
         anim = a;
         lastThrow = kind;
         Rolls++;
-        popT0 = -1;
         timer.Start();
     }
 
@@ -323,25 +247,20 @@ sealed unsafe class DieWindow : Form
     void Tick()
     {
         double now = clock.Elapsed.TotalMilliseconds;
-        bool popDone = false;
         if (anim is { } a)
         {
             double t = Math.Min(1, (now - a.T0) / DURATION);
             Pose(a, t);
-            if (t >= 1) { orient = shown; hop = 0; anim = null; popT0 = now; if (Auto) autoPause.Start(); }
+            if (t >= 1) { orient = shown; hop = 0; anim = null; if (Auto) autoPause.Start(); }
         }
         // масштаб: колёсико задаёт цель, кубик плавно доезжает до неё
         if (scale != Prefs.Scale)
         {
             double diff = Prefs.Scale - scale;
             scale = Math.Abs(diff) < 0.003 ? Prefs.Scale : scale + diff * 0.22;
-            var wa = Screen.FromPoint(center).WorkingArea;
-            verdictUp = center.Y + (124 * scale + 4) * Dpi > wa.Bottom;
         }
-        if (popT0 >= 0) popDone = now - popT0 >= 300;
         Frame();
-        if (popDone) popT0 = -1;
-        if (anim == null && scale == Prefs.Scale && popT0 < 0) timer.Stop();
+        if (anim == null && scale == Prefs.Scale) timer.Stop();
     }
 
     public void SetScale(double k)
@@ -355,9 +274,7 @@ sealed unsafe class DieWindow : Form
     }
 
     // ---------- из меню ----------
-    public void SetFreq(int v) { Prefs.Freq = Math.Clamp(v, 0, 100); Prefs.Save(); if (VerdictVisible) Frame(); }
     public void SetStyle(string id) { Prefs.Style = id; Prefs.Save(); renderer.SetStyle(Style); Frame(); }
-    public void ToggleVerdict() { Prefs.Verdict = !Prefs.Verdict; Prefs.Save(); Frame(); }
     public void ToggleOnTop() { Prefs.OnTop = !Prefs.OnTop; Prefs.Save(); TopMost = Prefs.OnTop; }
 
     void OpenMenu(Point at)
@@ -462,7 +379,7 @@ sealed unsafe class DieWindow : Form
 
     public Bitmap Snapshot(bool rolled)
     {
-        if (rolled) { Prefs.Verdict = true; Roll(); while (anim != null || popT0 >= 0) { Tick(); Thread.Sleep(15); } }
+        if (rolled) { Roll(); while (anim != null) { Tick(); Thread.Sleep(15); } }
         else Frame();
         return new Bitmap(bufBmp);
     }

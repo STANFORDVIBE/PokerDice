@@ -68,7 +68,7 @@ static class Program
             foreach (var at in new[] { new Point(wa.Left + 5, wa.Top + 5), new Point(wa.Right - 5, wa.Top + 5), new Point(wa.Left + 5, wa.Bottom - 5), new Point(wa.Right - 5, wa.Bottom - 5) })
             {
                 using var m = new MenuWindow(die, at);
-                var panel = new Rectangle(m.Location.X + (int)(18 * die.Dpi), m.Location.Y + (int)(12 * die.Dpi), (int)(214 * die.Dpi), (int)(352 * die.Dpi));
+                var panel = new Rectangle(m.Location.X + (int)(18 * die.Dpi), m.Location.Y + (int)(12 * die.Dpi), (int)(214 * die.Dpi), (int)(202 * die.Dpi));
                 Console.WriteLine($"menu at {at}: {(wa.Contains(panel) ? "OK" : "FAIL")} {panel}");
             }
         }
