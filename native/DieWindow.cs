@@ -13,11 +13,13 @@ sealed unsafe class DieWindow : Form
     const double MIN_SCALE = 0.5, MAX_SCALE = 2.5;
     const double DURATION = 1400; const int TURNS = 2;
     const int HOTKEY_ID = 1;
+    const int AUTO_PAUSE = 1600;                    // автобросок: столько показываем выпавшее, потом бросаем снова
 
     public readonly Prefs Prefs = Prefs.Load();
     readonly DieRenderer renderer = new();
     readonly System.Windows.Forms.Timer timer = new() { Interval = 15 };
     readonly System.Windows.Forms.Timer hotkeyRetry = new() { Interval = 5000 };
+    readonly System.Windows.Forms.Timer autoPause = new() { Interval = AUTO_PAUSE };
     readonly Stopwatch clock = Stopwatch.StartNew();
     LayeredBuffer buf;
     Bitmap bufBmp;
@@ -42,6 +44,8 @@ sealed unsafe class DieWindow : Form
     bool verdictUp;                                 // подсказка над кубиком (снизу нет места до края экрана)
     MenuWindow menu;
     public long MenuClosedAt;                       // клик по кубику, закрывший меню, не бросает
+    public bool Auto { get; private set; }          // автобросок: бросок за броском, пока не остановят
+    public int Rolls { get; private set; }          // сколько бросков было (для проверки)
 
     public DieWindow()
     {
@@ -65,6 +69,7 @@ sealed unsafe class DieWindow : Form
         Location = new Point(center.X - WIN_W / 2, center.Y - WIN_H / 2);   // окно сразу на нужном мониторе
         Size = new Size(WIN_W, WIN_H);
         timer.Tick += (s, e) => Tick();
+        autoPause.Tick += (s, e) => { autoPause.Stop(); if (Auto) AutoRoll(); };
     }
 
     public DieStyle Style => DieRenderer.Styles.First(s => s.Id == Prefs.Style);
@@ -111,7 +116,7 @@ sealed unsafe class DieWindow : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == Native.WM_HOTKEY) { RaiseQuietly(); Roll(); return; }
+        if (m.Msg == Native.WM_HOTKEY) { RaiseQuietly(); RollOrStop(); return; }
         if (m.Msg == Program.ShowMsg) { RaiseQuietly(); Activate(); return; }
         base.WndProc(ref m);
     }
@@ -223,6 +228,32 @@ sealed unsafe class DieWindow : Form
     // каждый раз случайно, но не два одинаковых подряд
     public void Roll() => Roll(PickThrow());
 
+    // клик, пробел, PgUp: при автоброске — остановить его (текущий бросок докатится и покажет число), иначе бросить
+    void RollOrStop()
+    {
+        if (Auto) StopAuto();
+        else Roll();
+    }
+
+    public void StartAuto()
+    {
+        Auto = true;
+        AutoRoll();
+    }
+
+    public void StopAuto()
+    {
+        Auto = false;
+        autoPause.Stop();
+    }
+
+    // пока открыто меню, не бросаем — бросок закрыл бы его; ждём ещё одну паузу
+    void AutoRoll()
+    {
+        if (menu != null || anim != null) autoPause.Start();
+        else Roll();
+    }
+
     Throw PickThrow()
     {
         var all = Enum.GetValues<Throw>().Where(k => k != lastThrow).ToArray();
@@ -260,6 +291,7 @@ sealed unsafe class DieWindow : Form
         }
         anim = a;
         lastThrow = kind;
+        Rolls++;
         popT0 = -1;
         timer.Start();
     }
@@ -296,7 +328,7 @@ sealed unsafe class DieWindow : Form
         {
             double t = Math.Min(1, (now - a.T0) / DURATION);
             Pose(a, t);
-            if (t >= 1) { orient = shown; hop = 0; anim = null; popT0 = now; }
+            if (t >= 1) { orient = shown; hop = 0; anim = null; popT0 = now; if (Auto) autoPause.Start(); }
         }
         // масштаб: колёсико задаёт цель, кубик плавно доезжает до неё
         if (scale != Prefs.Scale)
@@ -364,7 +396,7 @@ sealed unsafe class DieWindow : Form
         if (e.Button == MouseButtons.Left && drag is { } d)
         {
             drag = null;
-            if (!d.moved && !d.swallow) Roll();
+            if (!d.moved && !d.swallow) RollOrStop();
         }
         if (e.Button == MouseButtons.Right) OpenMenu(Cursor.Position);
         base.OnMouseUp(e);
@@ -379,7 +411,7 @@ sealed unsafe class DieWindow : Form
     long lastEsc;
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        if (e.KeyCode is Keys.Space or Keys.Enter) Roll();
+        if (e.KeyCode is Keys.Space or Keys.Enter) RollOrStop();
         if (e.KeyCode == Keys.Escape)
         {
             if (Environment.TickCount64 - lastEsc < 600) Close();

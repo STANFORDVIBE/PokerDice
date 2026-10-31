@@ -21,6 +21,12 @@ static class Program
         Application.Run(new DieWindow());
     }
 
+    static void Pump(int ms)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < ms) { Application.DoEvents(); Thread.Sleep(5); }
+    }
+
     static void Shot(string dir)
     {
         ApplicationConfiguration.Initialize();
@@ -62,10 +68,20 @@ static class Program
             foreach (var at in new[] { new Point(wa.Left + 5, wa.Top + 5), new Point(wa.Right - 5, wa.Top + 5), new Point(wa.Left + 5, wa.Bottom - 5), new Point(wa.Right - 5, wa.Bottom - 5) })
             {
                 using var m = new MenuWindow(die, at);
-                var panel = new Rectangle(m.Location.X + (int)(18 * die.Dpi), m.Location.Y + (int)(12 * die.Dpi), (int)(214 * die.Dpi), (int)(319 * die.Dpi));
+                var panel = new Rectangle(m.Location.X + (int)(18 * die.Dpi), m.Location.Y + (int)(12 * die.Dpi), (int)(214 * die.Dpi), (int)(352 * die.Dpi));
                 Console.WriteLine($"menu at {at}: {(wa.Contains(panel) ? "OK" : "FAIL")} {panel}");
             }
         }
+        // автобросок: за 6 с — бросок за броском, после остановки новых нет
+        int before = die.Rolls;
+        die.StartAuto();
+        Pump(6000);
+        int auto = die.Rolls - before;
+        die.StopAuto();
+        Pump(500);
+        before = die.Rolls;
+        Pump(4000);
+        Console.WriteLine($"auto: {auto} rolls in 6 s, after stop: {die.Rolls - before} {(auto >= 2 && die.Rolls == before ? "OK" : "FAIL")}");
         using var menu = new MenuWindow(die, new Point(100, 100));
         menu.Snapshot().Save(Path.Combine(dir, "menu.png"));
         Console.WriteLine("ok");

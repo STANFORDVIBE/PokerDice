@@ -7,8 +7,8 @@ namespace PokerDice;
 
 sealed class MenuWindow : Form
 {
-    // размеры в логических пикселях; панель 214×319, вокруг поля под тень 0 6px 18px
-    const float W = 214, H = 319, ML = 18, MT = 12, MR = 18, MB = 24;
+    // размеры в логических пикселях; панель 214×352, вокруг поля под тень 0 6px 18px
+    const float W = 214, H = 352, ML = 18, MT = 12, MR = 18, MB = 24;
     const float IN_X = 15, IN_W = 184;                 // ширина содержимого блоков с ползунком и стилями
     static readonly int[] PRESETS = { 25, 33, 50, 66, 75 };
 
@@ -27,7 +27,8 @@ sealed class MenuWindow : Form
     static readonly RectangleF Slider = new(IN_X, 40, IN_W, 16);
     static RectangleF Preset(int i) { float w = (IN_W - 4 * 4) / 5; return new(IN_X + i * (w + 4), 64, w, 21); }
     static RectangleF Swatch(int i) => new(IN_X + i * 39, 157, 32, 32);
-    static readonly RectangleF ItemVerdict = new(7, 206, 200, 31), ItemTop = new(7, 239, 200, 31), ItemClose = new(7, 281, 200, 31);
+    static readonly RectangleF ItemVerdict = new(7, 206, 200, 31), ItemTop = new(7, 239, 200, 31),
+        ItemAuto = new(7, 272, 200, 31), ItemClose = new(7, 314, 200, 31);
 
     public MenuWindow(DieWindow die, Point at)
     {
@@ -79,6 +80,13 @@ sealed class MenuWindow : Form
     {
         fade.Dispose(); bmp.Dispose(); buf.Dispose();
         base.OnFormClosed(e);
+    }
+
+    // меню, уничтоженное без закрытия, не должно дорисовываться по таймеру
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) fade.Dispose();
+        base.Dispose(disposing);
     }
 
     // плавное появление за 120 мс
@@ -169,7 +177,8 @@ sealed class MenuWindow : Form
 
             Item(g, ItemVerdict, "verdict", "Показывать рейз/фолд", ui, p.Verdict);
             Item(g, ItemTop, "top", "Поверх всех окон", ui, p.OnTop);
-            Sep(g, 275);
+            Item(g, ItemAuto, "auto", "Автобросок", ui, die.Auto);
+            Sep(g, 308);
             Item(g, ItemClose, "close", "Закрыть", ui, null);
             DrawText(g, "Esc×2", small, Palette.Muted, new RectangleF(ItemClose.X + 8, ItemClose.Y, ItemClose.Width - 16, ItemClose.Height), StringAlignment.Far);
         }
@@ -224,6 +233,7 @@ sealed class MenuWindow : Form
         for (int i = 0; i < DieRenderer.Styles.Length; i++) if (Swatch(i).Contains(p)) return "s" + i;
         if (ItemVerdict.Contains(p)) return "verdict";
         if (ItemTop.Contains(p)) return "top";
+        if (ItemAuto.Contains(p)) return "auto";
         if (ItemClose.Contains(p)) return "close";
         return null;
     }
@@ -260,6 +270,11 @@ sealed class MenuWindow : Form
         else if (h[0] == 's' && h.Length == 2) die.SetStyle(DieRenderer.Styles[h[1] - '0'].Id);
         else if (h == "verdict") die.ToggleVerdict();
         else if (h == "top") die.ToggleOnTop();
+        else if (h == "auto")
+        {
+            if (die.Auto) die.StopAuto();
+            else { Close(); die.StartAuto(); return; }   // включили — меню убираем, кубик сразу пошёл
+        }
         else if (h == "close") { die.Close(); return; }
         Draw();
     }
