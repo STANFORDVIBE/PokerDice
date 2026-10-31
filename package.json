@@ -1,0 +1,17 @@
+{
+  "name": "poker-dice",
+  "version": "1.0.0",
+  "description": "Кубик: рандомайзер 1–100 для смешанных стратегий",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "electron tools/make-icon.js"
+  },
+  "devDependencies": {
+    "electron": "33.2.1"
+  },
+  "dependencies": {
+    "three": "0.169.0"
+  }
+}
