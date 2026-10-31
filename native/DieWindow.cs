@@ -27,15 +27,14 @@ sealed unsafe class DieWindow : Form
     int[] nums = new int[6];
     int? result;
     M3 orient = DieRenderer.VIEW, shown = DieRenderer.VIEW;
-    double hop, slide;
-    public enum Throw { Spin, Tumble, Top, Roll }   // кручение, кувырок, волчок, перекат
+    double hop;
+    public enum Throw { Spin, Tumble, Top }         // кручение, кувырок, волчок
     struct Anim
     {
         public Throw Kind;
         public V3 Axis, Axis2;                      // главный поворот к выпавшей грани и второй — для кувырка
         public double Angle, Angle2, T0;
         public M3 End;
-        public double Dir, Amp;                     // перекат: в какую сторону и насколько
     }
     Anim? anim;
     Throw? lastThrow;
@@ -130,7 +129,7 @@ sealed unsafe class DieWindow : Form
     void Frame()
     {
         buf.Pixels.Clear();
-        renderer.Render((uint*)buf.Bits, buf.Width, buf.Height, DieRenderer.SIZE * scale * Dpi, shown, hop, slide);
+        renderer.Render((uint*)buf.Bits, buf.Width, buf.Height, DieRenderer.SIZE * scale * Dpi, shown, hop);
         DrawVerdict();
         Present();
     }
@@ -226,12 +225,9 @@ sealed unsafe class DieWindow : Form
 
     Throw PickThrow()
     {
-        var all = Enum.GetValues<Throw>().Where(k => k != lastThrow && (k != Throw.Roll || RollAmp() >= 0.35)).ToArray();
+        var all = Enum.GetValues<Throw>().Where(k => k != lastThrow).ToArray();
         return all[Rng.Next(all.Length)];
     }
-
-    // насколько далеко можно откатиться вбок, не вылезая из окна (в рёбрах кубика)
-    double RollAmp() => Math.Clamp(WIN_W / 2.0 / (DieRenderer.SIZE * scale) - 1.0, 0, 1.1);
 
     public void Roll(Throw kind)
     {
@@ -261,11 +257,6 @@ sealed unsafe class DieWindow : Form
             case Throw.Top:
                 a.Angle2 = 2 * Math.PI * 3 * sign;
                 break;
-            case Throw.Roll:                         // откатываемся туда, где на экране больше места
-                var wa = Screen.FromPoint(center).WorkingArea;
-                a.Dir = center.X < wa.X + wa.Width / 2 ? 1 : -1;
-                a.Amp = RollAmp();
-                break;
         }
         anim = a;
         lastThrow = kind;
@@ -273,12 +264,11 @@ sealed unsafe class DieWindow : Form
         timer.Start();
     }
 
-    // положение кубика на доле t (0..1) броска: поворот, высота прыжка, сдвиг вбок
+    // положение кубика на доле t (0..1) броска: поворот и высота прыжка
     void Pose(Anim a, double t)
     {
         static double Out(double x, double p) => 1 - Math.Pow(1 - Math.Clamp(x, 0, 1), p);
         var view = DieRenderer.VIEW;
-        slide = 0;
         switch (a.Kind)
         {
             case Throw.Spin:                         // кручение с подскоками
@@ -293,12 +283,6 @@ sealed unsafe class DieWindow : Form
                 shown = view * M3.RotY(a.Angle2 * (1 - Out(t, 2))) * M3.RotAxis(a.Axis, a.Angle * (1 - Out(t, 1.6))) * a.End;
                 hop = t < 0.25 ? 0.4 * Math.Sin(4 * Math.PI * t) : t > 0.8 ? 0.1 * Math.Sin(5 * Math.PI * (t - 0.8)) : 0;
                 break;
-            case Throw.Roll:                         // отлетает вбок и катится обратно по столу
-                slide = a.Amp * a.Dir * (t < 0.35 ? Math.Sin(Math.PI / 2 * t / 0.35) : 1 - Out((t - 0.35) / 0.65, 2.5));
-                var tilt = DieRenderer.TILT;
-                shown = tilt * M3.RotAxis(new V3(0, 0, 1), -slide / 0.5) * tilt.T * view * M3.RotAxis(a.Axis, a.Angle * (1 - Out(t / 0.45, 3))) * a.End;
-                hop = t < 0.35 ? 0.7 * Math.Sin(Math.PI * t / 0.35) : t < 0.5 ? 0.12 * Math.Sin(Math.PI * (t - 0.35) / 0.15) : 0;
-                break;
         }
         // крупный кубик не должен выпрыгивать из окна
         hop *= Math.Clamp((WIN_H / 2.0 / (DieRenderer.SIZE * scale) - 0.95) / 0.44, 0.3, 1);
@@ -312,7 +296,7 @@ sealed unsafe class DieWindow : Form
         {
             double t = Math.Min(1, (now - a.T0) / DURATION);
             Pose(a, t);
-            if (t >= 1) { orient = shown; hop = 0; slide = 0; anim = null; popT0 = now; }
+            if (t >= 1) { orient = shown; hop = 0; anim = null; popT0 = now; }
         }
         // масштаб: колёсико задаёт цель, кубик плавно доезжает до неё
         if (scale != Prefs.Scale)
@@ -430,7 +414,7 @@ sealed unsafe class DieWindow : Form
                 g.DrawImage(bufBmp, i * fw, 0, fw, fh);
             }
         Pose(a, 1);
-        orient = shown; hop = slide = 0; anim = null;
+        orient = shown; hop = 0; anim = null;
         return strip;
     }
 

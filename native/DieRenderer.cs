@@ -573,12 +573,11 @@ sealed unsafe class DieRenderer
     static readonly (double x, double y)[] SUB = { (0.375, 0.125), (0.875, 0.375), (0.125, 0.625), (0.625, 0.875) };
 
     // рисует кубик с тенью в px (BGRA, предумноженная альфа) размером w×h; k — пикселей на ребро кубика;
-    // m — поворот кубика у зрителя, hop — высота прыжка 0..1, slide — сдвиг вбок по столу (в рёбрах кубика).
-    // Возвращает область, куда рисовали.
-    public Rectangle Render(uint* px, int w, int h, double k, M3 m, double hop, double slide = 0)
+    // m — поворот кубика у зрителя, hop — высота прыжка 0..1. Возвращает область, куда рисовали.
+    public Rectangle Render(uint* px, int w, int h, double k, M3 m, double hop)
     {
         var o = new V3(0, 0, DIST);
-        var cw = new V3(slide, hop * 0.44, 0);          // центр кубика в «мире»
+        var cw = new V3(0, hop * 0.44, 0);              // центр кубика в «мире»
         var cv = TILT * cw;                              // и у зрителя
         var mT = m.T;
         var rw = TILT.T * m; var rwT = rw.T;             // поворот кубика в «мире»
@@ -604,7 +603,7 @@ sealed unsafe class DieRenderer
         foreach (var cx in new[] { -0.5, 0.5 }) foreach (var cy in new[] { -0.5, 0.5 }) foreach (var cz in new[] { -0.5, 0.5 })
             corners.Add(new V3(cx, cy, cz));
         var cubeBox = Frame(corners.Select(c => cv + m * c));
-        var blobBox = Frame(new[] { (-1, -1), (-1, 1), (1, -1), (1, 1) }.Select(q => TILT * new V3(slide + q.Item1 * blobR, -0.5, q.Item2 * blobR)));
+        var blobBox = Frame(new[] { (-1, -1), (-1, 1), (1, -1), (1, 1) }.Select(q => TILT * new V3(q.Item1 * blobR, -0.5, q.Item2 * blobR)));
         var shadowBox = Frame(corners.Select(c =>
         {
             var p = cw + rw * c;                         // угол кубика в «мире» → по лучу лампы на пол
@@ -661,9 +660,8 @@ sealed unsafe class DieRenderer
                     double dn = V3.Dot(d, floorN);
                     if (dn >= 0) continue;
                     var pw = TILT.T * (o + d * (V3.Dot(floorP - o, floorN) / dn));
-                    double bx = pw.X - slide;
-                    if (Math.Abs(bx) > 2 || Math.Abs(pw.Z) > 2) continue;
-                    double fa = 0, dist = Math.Sqrt(bx * bx + pw.Z * pw.Z) / blobR;
+                    if (Math.Abs(pw.X) > 2 || Math.Abs(pw.Z) > 2) continue;
+                    double fa = 0, dist = Math.Sqrt(pw.X * pw.X + pw.Z * pw.Z) / blobR;
                     if (dist < 1) fa = (dist < 0.45 ? 0.5 - 0.3 * dist / 0.45 : 0.2 * (1 - dist) / 0.55) * blobA;
                     if (inShadow)
                     {
