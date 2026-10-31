@@ -41,6 +41,7 @@ static class Program
         {
             die.SetStyle(st.Id);
             die.Snapshot(false).Save(Path.Combine(dir, st.Id + ".png"));
+            foreach (var s in new[] { 0.5, 0.7, 1.0, 2.5 }) die.Closeup(s).Save(Path.Combine(dir, $"{st.Id}-{s * 100}.png"));
         }
         for (int i = 0; i < 2; i++)
         {

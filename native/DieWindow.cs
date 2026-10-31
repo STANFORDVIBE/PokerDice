@@ -341,6 +341,16 @@ sealed unsafe class DieWindow : Form
         return ms;
     }
 
+    // кубик крупным планом на масштабе s с одними и теми же числами: проверить, как читаются цифры
+    public Bitmap Closeup(double s)
+    {
+        if (nums[0] != 39) { nums = new[] { 39, 48, 61, 86, 14, 100 }; renderer.SetNumbers(nums); }
+        scale = s; hop = 0;
+        Frame();
+        int r = (int)Math.Ceiling(RADIUS * s * Dpi) + 4;
+        return bufBmp.Clone(new Rectangle(buf.Width / 2 - r, buf.Height / 2 - r, 2 * r, 2 * r), bufBmp.PixelFormat);
+    }
+
     public Bitmap Snapshot(bool rolled)
     {
         if (rolled) { Prefs.Verdict = true; Roll(); while (anim != null || popT0 >= 0) { Tick(); Thread.Sleep(15); } }

@@ -33,7 +33,7 @@ sealed unsafe class DieRenderer
     // повороты, которые выводят грань i лицом к зрителю
     public static readonly M3[] TO_FRONT =
         { M3.RotY(0), M3.RotY(Math.PI), M3.RotY(-Math.PI / 2), M3.RotY(Math.PI / 2), M3.RotX(Math.PI / 2), M3.RotX(-Math.PI / 2) };
-    static readonly V3[] FU = new V3[6], FV = new V3[6];
+    static readonly V3[] FU = new V3[6], FV = new V3[6], FN = new V3[6];
     static readonly int[] FACE_OF = new int[6];          // ось +x, −x, +y, −y, +z, −z → номер грани
 
     // ---------- свет ----------
@@ -57,7 +57,7 @@ sealed unsafe class DieRenderer
         for (int i = 0; i < 6; i++)
         {
             var place = TO_FRONT[i].T;                   // где грань сидит на кубике
-            var normal = place * new V3(0, 0, 1);
+            var normal = FN[i] = place * new V3(0, 0, 1);
             FU[i] = place * new V3(1, 0, 0);
             FV[i] = place * new V3(0, 1, 0);
             for (int a = 0; a < 6; a++)
@@ -183,7 +183,9 @@ sealed unsafe class DieRenderer
     readonly EnvMap coatEnv, bodyEnv, inkEnv, diffEnv;
 
     // ---------- текстуры граней ----------
-    readonly byte[][][] masks = new byte[6][][];     // цифры: [грань][уровень детализации] — где гравировка
+    // цифры: [грань][уровень детализации], на тексель четыре байта — заливка цифры, глубина канавки
+    // и наклон её стенок по x и y (128 — ровно)
+    readonly byte[][][] masks = new byte[6][][];
     byte[][] body;                                   // корпус с зерном, sRGB, по уровням детализации
     readonly byte[] grain = new byte[TEX * TEX * 4]; // зерно и пятна, как у кости (RGBA с предумноженной альфой)
     V3 ink;                                          // цвет цифр, sRGB 0..255
@@ -306,8 +308,56 @@ sealed unsafe class DieRenderer
                 for (int x = 0; x < TEX; x++) top[y * TEX + x] = row[x * 4 + 3];
             }
             bmp.UnlockBits(data);
-            masks[i] = Mips(top, 1);
+            masks[i] = Engrave(top);
         }
+    }
+
+    // канавка под цифрой: глубина — размытая маска, стенки идут по обе стороны контура. Краска — строго по цифре,
+    // так что она не худеет, а снаружи у контура видна кромка: тень с одной стороны и блик с другой
+    static byte[][] Engrave(byte[] top)
+    {
+        var blur = new float[TEX * TEX];
+        for (int i = 0; i < blur.Length; i++) blur[i] = top[i] / 255f;
+        for (int pass = 0; pass < 2; pass++) { BoxBlur(blur, true); BoxBlur(blur, false); }
+        var depth = new byte[TEX * TEX];
+        for (int i = 0; i < depth.Length; i++)
+        {
+            double t = Math.Clamp((blur[i] - 0.12) / 0.7, 0, 1);
+            depth[i] = (byte)Math.Round(255 * t * t * (3 - 2 * t));
+        }
+        byte[][] mm = Mips(top, 1), dm = Mips(depth, 1), levels = new byte[LEVELS][];
+        for (int l = 0, s = TEX; l < LEVELS; l++, s /= 2)
+        {
+            var d = dm[l]; var o = levels[l] = new byte[s * s * 4];
+            for (int y = 0; y < s; y++)
+                for (int x = 0; x < s; x++)
+                {
+                    int i = y * s + x;
+                    double gx = (d[y * s + Math.Min(x + 1, s - 1)] - d[y * s + Math.Max(x - 1, 0)]) / 510.0;
+                    double gy = (d[Math.Min(y + 1, s - 1) * s + x] - d[Math.Max(y - 1, 0) * s + x]) / 510.0;
+                    o[i * 4] = mm[l][i]; o[i * 4 + 1] = d[i];
+                    o[i * 4 + 2] = (byte)Math.Clamp(Math.Round(128 + gx * 127), 1, 255);
+                    o[i * 4 + 3] = (byte)Math.Clamp(Math.Round(128 + gy * 127), 1, 255);
+                }
+        }
+        return levels;
+    }
+
+    const int GROOVE = 5;                            // ширина стенки канавки, текселей
+    static void BoxBlur(float[] a, bool horiz)
+    {
+        Parallel.For(0, TEX, line =>
+        {
+            Span<float> src = stackalloc float[TEX];
+            for (int j = 0; j < TEX; j++) src[j] = a[horiz ? line * TEX + j : j * TEX + line];
+            float sum = 0; int n = 0;
+            for (int j = -GROOVE; j < TEX; j++)
+            {
+                if (j + GROOVE < TEX) { sum += src[j + GROOVE]; n++; }
+                if (j - GROOVE - 1 >= 0) { sum -= src[j - GROOVE - 1]; n--; }
+                if (j >= 0) a[horiz ? line * TEX + j : j * TEX + line] = sum / n;
+            }
+        });
     }
 
     // ---------- геометрия ----------
@@ -357,15 +407,37 @@ sealed unsafe class DieRenderer
     }
 
     // ---------- материал ----------
-    double SampleMask(int face, int lvl, double u, double v)
+    // гравировка в точке: заливка 0..1, глубина 0..1 и наклон глубины по u и v (на единицу грани)
+    struct Groove { public double Ink, Depth, Du, Dv; }
+
+    void Fetch(int face, int lvl, double u, double v, double w, ref Groove g)
     {
         int s = TEX >> lvl; var m = masks[face][lvl];
         double fx = u * s - 0.5, fy = (1 - v) * s - 0.5;
         int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
         double tx = fx - x0, ty = fy - y0;
         int xa = Math.Clamp(x0, 0, s - 1), xb = Math.Clamp(x0 + 1, 0, s - 1), ya = Math.Clamp(y0, 0, s - 1), yb = Math.Clamp(y0 + 1, 0, s - 1);
-        double a = m[ya * s + xa] + (m[ya * s + xb] - m[ya * s + xa]) * tx, b = m[yb * s + xa] + (m[yb * s + xb] - m[yb * s + xa]) * tx;
-        return (a + (b - a) * ty) / 255;
+        int i00 = (ya * s + xa) * 4, i01 = (ya * s + xb) * 4, i10 = (yb * s + xa) * 4, i11 = (yb * s + xb) * 4;
+        double w00 = (1 - tx) * (1 - ty) * w, w01 = tx * (1 - ty) * w, w10 = (1 - tx) * ty * w, w11 = tx * ty * w;
+        double C(int c) => m[i00 + c] * w00 + m[i01 + c] * w01 + m[i10 + c] * w10 + m[i11 + c] * w11;
+        g.Ink += C(0) / 255; g.Depth += C(1) / 255;
+        g.Du += (C(2) - 128 * w) / 127 * s; g.Dv -= (C(3) - 128 * w) / 127 * s;   // в текстуре y вниз, а v вверх
+    }
+
+    // как анизотропная фильтрация у видеокарты: детализация — по узкой стороне пятна пикселя на грани,
+    // а вдоль длинной (на наклонной грани) несколько выборок. Иначе на верхней и боковой гранях цифры рябят
+    Groove SampleGroove(int face, double u, double v, double lod, double au, double av, int taps)
+    {
+        lod = Math.Clamp(lod, 0, LEVELS - 1);
+        int l0 = Math.Min((int)lod, LEVELS - 2); double f = lod - l0;
+        var g = new Groove();
+        for (int i = 0; i < taps; i++)
+        {
+            double o = (i + 0.5) / taps - 0.5, uu = u + au * o, vv = v + av * o;
+            Fetch(face, l0, uu, vv, (1 - f) / taps, ref g);
+            if (f > 0) Fetch(face, l0 + 1, uu, vv, f / taps, ref g);
+        }
+        return g;
     }
 
     V3 SampleBody(int lvl, double u, double v)
@@ -416,8 +488,11 @@ sealed unsafe class DieRenderer
         return V3.Lerp(c, new V3(np, np, np), g);
     }
 
-    // цвет точки кубика (у зрителя): p — точка в осях кубика, view — направление на камеру
-    V3 Shade(V3 p, M3 m, V3 view, int lvl)
+    const double DEEP = 0.016;                       // глубина гравировки (ребро кубика — 1)
+
+    // цвет точки кубика (у зрителя): p — точка в осях кубика, view — направление на камеру,
+    // keyL — направление на лампу в осях кубика, foot — сколько грани приходится на пиксель
+    V3 Shade(V3 p, M3 m, M3 mT, V3 keyL, V3 view, double foot)
     {
         var nl = new V3(Pow23(p.X * 2), Pow23(p.Y * 2), Pow23(p.Z * 2)).Norm();
         double ax = Math.Abs(p.X), ay = Math.Abs(p.Y), az = Math.Abs(p.Z);
@@ -425,7 +500,33 @@ sealed unsafe class DieRenderer
         int face = FACE_OF[axis];
         double u = V3.Dot(p, FU[face]) + 0.5, v = V3.Dot(p, FV[face]) + 0.5;
 
-        double mask = SampleMask(face, lvl, u, v);
+        // пятно пикселя на грани: поперёк взгляда — foot, вдоль наклона — foot / cos
+        var lv = mT * view;
+        double pu = V3.Dot(lv, FU[face]), pv = V3.Dot(lv, FV[face]), pl = Math.Sqrt(pu * pu + pv * pv);
+        double stretch = 1 / Math.Max(Math.Abs(V3.Dot(lv, FN[face])), 0.1);
+        int taps = Math.Min((int)Math.Ceiling(stretch - 0.05), 8);
+        double lod = Math.Log2(foot * TEX), au = 0, av = 0;
+        if (taps > 1 && pl > 1e-6) { au = pu / pl * foot * stretch; av = pv / pl * foot * stretch; }
+        else taps = 1;
+        var gr = SampleGroove(face, u, v, lod, au, av, taps);
+        double mask = gr.Ink;
+        int lvl = Math.Clamp((int)Math.Round(lod), 0, LEVELS - 1);
+
+        // стенки канавки наклоняют нормаль внутрь цифры. На мелком кубике стенки мельче пикселя
+        // и только мылят цифру — там рельеф слабее
+        double relief = Math.Clamp(3.6 - lod, 0.3, 1);
+        nl = (nl + (FU[face] * gr.Du + FV[face] * gr.Dv) * (DEEP * relief)).Norm();
+        // у стенки, что ближе к лампе, канавка в её тени; в глубине и рассеянного света меньше
+        double shadow = 0, ao = 1 - 0.2 * gr.Depth * relief;
+        double ln = V3.Dot(keyL, FN[face]);
+        if (gr.Depth > 0.02 && ln > 0.05)
+        {
+            double k = DEEP * gr.Depth / ln;
+            var sh = SampleGroove(face, u + V3.Dot(keyL, FU[face]) * k, v + V3.Dot(keyL, FV[face]) * k, lod, 0, 0, 1);
+            shadow = Math.Clamp((gr.Depth - sh.Depth) * 2, 0, 1) * relief;
+            ao *= 1 - 0.35 * shadow;
+        }
+
         var srgb = V3.Lerp(SampleBody(lvl, u, v), ink, mask);
         var albedo = new V3(ToLin(srgb.X), ToLin(srgb.Y), ToLin(srgb.Z));
         double coat = 0.3 * (1 - mask), rough = 0.45 + 0.35 * mask;
@@ -441,11 +542,12 @@ sealed unsafe class DieRenderer
         var color = albedo * diffEnv.Sample(nuv) * (1 - spec) + V3.Lerp(bodyEnv.Sample(ruv), inkEnv.Sample(ruv), mask) * spec;
         // рассеянная подсветка теней: небо и стол
         color += albedo * V3.Lerp(GROUND, SKY, 0.5 * n.Y + 0.5) * (1 / Math.PI);
+        color *= ao;
         // лампа
         double ndl = V3.Dot(n, KEY_V), irr = 0, ndh = 0, vdh = 0;
         if (ndl > 0)
         {
-            irr = ndl * KEY;
+            irr = ndl * KEY * (1 - 0.85 * shadow);
             var h = (KEY_V + view).Norm();
             ndh = Math.Max(V3.Dot(n, h), 0); vdh = Math.Max(V3.Dot(view, h), 0);
             color += albedo * (irr / Math.PI) + new V3(1, 1, 1) * (irr * Ggx(ndl, ndv, ndh, vdh, rough, 0.04));
@@ -480,10 +582,11 @@ sealed unsafe class DieRenderer
         var mT = m.T;
         var rw = TILT.T * m; var rwT = rw.T;             // поворот кубика в «мире»
         var lo = mT * (o - cv);                          // камера в осях кубика
+        var keyL = mT * KEY_V;                           // лампа в осях кубика
+        double perT = 1 / (k * DIST);                    // размер пикселя на расстоянии 1 от камеры
         var floorN = TILT * new V3(0, 1, 0);
         var floorP = TILT * new V3(0, -0.5, 0);
         double blobR = 0.8 * (1 - 0.4 * hop), blobA = 1 - 0.6 * hop;
-        int lvl = Math.Clamp((int)Math.Floor(Math.Log2(TEX / k)), 0, LEVELS - 1);
 
         // где что может быть на экране: рамки кубика, пятна под ним и тени от лампы — лучи пускаем только туда
         RectangleF Frame(IEnumerable<V3> pts)
@@ -539,7 +642,7 @@ sealed unsafe class DieRenderer
                     var d = Ray(x + 0.5, y + 0.5); var ld = mT * d;
                     double t = Box(lo, ld);
                     if (t <= 0) { d = Ray(x + SUB[0].x, y + SUB[0].y); ld = mT * d; t = hitT[0]; }
-                    var c = Shade(lo + ld * t, m, -d, lvl);
+                    var c = Shade(lo + ld * t, m, mT, keyL, -d, t * perT);
                     row[x] = 0xFF000000u | (uint)c.X << 16 | (uint)c.Y << 8 | (uint)c.Z;
                     continue;
                 }
@@ -548,7 +651,7 @@ sealed unsafe class DieRenderer
                     var d = Ray(x + SUB[s].x, y + SUB[s].y);
                     if (hitT[s] > 0)
                     {
-                        var c = Shade(lo + mT * d * hitT[s], m, -d, lvl);
+                        var c = Shade(lo + mT * d * hitT[s], m, mT, keyL, -d, hitT[s] * perT);
                         r += c.X; g += c.Y; b += c.Z; a += 255;
                         continue;
                     }
