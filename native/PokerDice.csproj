@@ -9,6 +9,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>PokerDice</AssemblyName>
     <RootNamespace>PokerDice</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>Кубик</Product>
+    <Description>Кубик 1–100 для смешанных стратегий</Description>
     <ApplicationIcon>..\icon.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <InvariantGlobalization>true</InvariantGlobalization>
