@@ -1,6 +1,6 @@
 // Кубик: маленькое прозрачное окно без рамки — на экране только кубик.
 // Весь интерфейс и анимация — в ui/index.html.
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -29,6 +29,13 @@ function savePos(win) {
   } catch (e) {}
 }
 
+// рабочая область экрана, на котором стоит кубик, — в координатах окна: по ней меню и подсказка не уезжают за край
+function areaOf(win) {
+  const [x, y] = win.getPosition();
+  const a = screen.getDisplayNearestPoint({ x: x + WIDTH / 2, y: y + HEIGHT / 2 }).workArea;
+  return { left: a.x - x, top: a.y - y, right: a.x + a.width - x, bottom: a.y + a.height - y };
+}
+
 if (!app.requestSingleInstanceLock()) app.quit();
 
 app.whenReady().then(() => {
@@ -47,7 +54,23 @@ app.whenReady().then(() => {
   const size = { width: WIDTH, height: HEIGHT };
   ipcMain.on('on-top', (e, v) => win.setAlwaysOnTop(!!v));
   ipcMain.on('close', () => win.close());
-  ipcMain.on('move-to', (e, x, y) => win.setBounds({ x: Math.round(x), y: Math.round(y), ...size }));
+  const sendArea = () => win.webContents.send('area', areaOf(win));
+  // кубик (r — его радиус в пикселях) целиком остаётся на экране, куда его тащат
+  ipcMain.on('move-to', (e, x, y, r = 0) => {
+    const cx = x + WIDTH / 2, cy = y + HEIGHT / 2;
+    const a = screen.getDisplayNearestPoint({ x: Math.round(cx), y: Math.round(cy) }).workArea;
+    const fit = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+    x = fit(cx, a.x + r, a.x + a.width - r) - WIDTH / 2;
+    y = fit(cy, a.y + r, a.y + a.height - r) - HEIGHT / 2;
+    win.setBounds({ x: Math.round(x), y: Math.round(y), ...size });
+    sendArea();
+  });
+  win.webContents.on('did-finish-load', sendArea);
+  screen.on('display-metrics-changed', sendArea);
+  screen.on('display-removed', sendArea);
+
+  // PgUp бросает кубик из любого окна: кубик всплывает поверх остальных, но фокус у игры не забирает
+  globalShortcut.register('PageUp', () => { win.moveTop(); win.webContents.send('roll'); });
   // пустые прозрачные места пропускают клики к тому, что под окном
   ipcMain.on('ignore-mouse', (e, v) => win.setIgnoreMouseEvents(!!v, { forward: true }));
 
@@ -63,4 +86,5 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('will-quit', () => globalShortcut.unregisterAll());
 app.on('window-all-closed', () => app.quit());
