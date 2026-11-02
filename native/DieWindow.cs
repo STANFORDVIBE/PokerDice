@@ -9,7 +9,7 @@ sealed unsafe class DieWindow : Form
 {
     // окно постоянного размера (под самый крупный кубик), кубик — в его центре: масштаб меняет только картинку
     public const int WIN_W = 575, WIN_H = 625;
-    const double RADIUS = 75;                       // половина видимого кубика при 100%: столько держим от края экрана
+    const double RADIUS = 0.86;                     // половина видимого кубика (в радиусах описанного шара): столько держим от края экрана
     const double MIN_SCALE = 0.5, MAX_SCALE = 2.5;
     const double DURATION = 1400; const int TURNS = 2;
     const int HOTKEY_ID = 1;
@@ -57,9 +57,8 @@ sealed unsafe class DieWindow : Form
         TopMost = Prefs.OnTop;
         scale = Prefs.Scale;
 
-        for (int i = 0; i < 6; i++) nums[i] = Rng.Roll100();
         renderer.SetStyle(Style);
-        renderer.SetNumbers(nums);
+        UseKind();
 
         var wa = Screen.PrimaryScreen.WorkingArea;
         center = Prefs.Cx is int cx && Prefs.Cy is int cy ? new Point(cx, cy) : new Point(wa.X + wa.Width / 2, wa.Y + wa.Height / 2);
@@ -71,6 +70,24 @@ sealed unsafe class DieWindow : Form
     }
 
     public DieStyle Style => DieRenderer.Styles.First(s => s.Id == Prefs.Style);
+    public DieKind Kind { get; private set; }
+
+    // кубик из настроек: числа на гранях и стартовое положение — лицом наибольшее число
+    void UseKind()
+    {
+        Kind = DieKind.All.First(k => k.Id == Prefs.Die);
+        renderer.SetKind(Kind);
+        int face = 0;
+        if (Kind.Random)
+        {
+            nums = new int[Kind.Faces];
+            for (int i = 0; i < nums.Length; i++) nums[i] = Rng.Roll100();
+            renderer.SetNumbers(nums);
+        }
+        else face = Array.IndexOf(Kind.Label, Kind.Sides);
+        anim = null; hop = 0;
+        orient = shown = DieRenderer.VIEW * Kind.ToFront[face];
+    }
 
     protected override CreateParams CreateParams
     {
@@ -142,7 +159,7 @@ sealed unsafe class DieWindow : Form
     void MoveCenter(Point p, bool redraw = false)
     {
         var wa = Screen.FromPoint(p).WorkingArea;
-        int r = (int)Math.Ceiling(RADIUS * Prefs.Scale * Dpi);
+        int r = (int)Math.Ceiling(DieRenderer.SIZE * Kind.Bound * RADIUS * Prefs.Scale * Dpi);
         center = new Point(Math.Clamp(p.X, wa.Left + r, Math.Max(wa.Left + r, wa.Right - r)),
                            Math.Clamp(p.Y, wa.Top + r, Math.Max(wa.Top + r, wa.Bottom - r)));
         if (redraw) Frame();
@@ -189,13 +206,22 @@ sealed unsafe class DieWindow : Form
     {
         if (anim != null) return;
         menu?.Close();
-        result = Rng.Roll100();
-        int face = Rng.Next(6);
-        for (int i = 0; i < 6; i++) nums[i] = i == face ? result.Value : Rng.Roll100();
-        renderer.SetNumbers(nums);
+        int face;
+        if (Kind.Random)                             // d100: выпавшее число — на случайной грани, на остальных любые
+        {
+            result = Rng.Roll100();
+            face = Rng.Next(Kind.Faces);
+            for (int i = 0; i < nums.Length; i++) nums[i] = i == face ? result.Value : Rng.Roll100();
+            renderer.SetNumbers(nums);
+        }
+        else
+        {
+            result = Rng.Next(Kind.Sides) + 1;
+            face = Array.IndexOf(Kind.Label, result.Value);
+        }
 
         // из текущего положения в целевое вокруг одной оси (+ полные обороты — они не меняют, где кончим)
-        var end = DieRenderer.TO_FRONT[face];
+        var end = Kind.ToFront[face];
         var (axis, angle) = (DieRenderer.VIEW.T * orient * end.T).AxisAngle();
         double sign = Rng.Next(2) == 1 ? 1 : -1;
         var a = new Anim { Kind = kind, Axis = axis, Angle = angle, End = end, T0 = clock.Elapsed.TotalMilliseconds };
@@ -275,6 +301,13 @@ sealed unsafe class DieWindow : Form
 
     // ---------- из меню ----------
     public void SetStyle(string id) { Prefs.Style = id; Prefs.Save(); renderer.SetStyle(Style); Frame(); }
+    public void SetKind(string id)
+    {
+        Prefs.Die = id; Prefs.Save();
+        UseKind();                                  // бросок, если шёл, обрывается — автобросок продолжаем с паузы
+        if (Auto) autoPause.Start();
+        MoveCenter(center, true);
+    }
     public void ToggleOnTop() { Prefs.OnTop = !Prefs.OnTop; Prefs.Save(); TopMost = Prefs.OnTop; }
 
     void OpenMenu(Point at)
@@ -370,10 +403,10 @@ sealed unsafe class DieWindow : Form
     // кубик крупным планом на масштабе s с одними и теми же числами: проверить, как читаются цифры
     public Bitmap Closeup(double s)
     {
-        if (nums[0] != 39) { nums = new[] { 39, 48, 61, 86, 14, 100 }; renderer.SetNumbers(nums); }
+        if (Kind.Random && nums[0] != 39) { nums = new[] { 39, 48, 61, 86, 14, 100 }; renderer.SetNumbers(nums); }
         scale = s; hop = 0;
         Frame();
-        int r = (int)Math.Ceiling(RADIUS * s * Dpi) + 4;
+        int r = Math.Min((int)Math.Ceiling(DieRenderer.SIZE * Kind.Bound * (Kind.Cube ? RADIUS : 1.05) * s * Dpi) + 4, buf.Height / 2);
         return bufBmp.Clone(new Rectangle(buf.Width / 2 - r, buf.Height / 2 - r, 2 * r, 2 * r), bufBmp.PixelFormat);
     }
 

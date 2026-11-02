@@ -7,9 +7,10 @@ namespace PokerDice;
 
 sealed class MenuWindow : Form
 {
-    // размеры в логических пикселях; панель 214×202, вокруг поля под тень 0 6px 18px
-    const float W = 214, H = 202, ML = 18, MT = 12, MR = 18, MB = 24;
-    const float IN_X = 15, IN_W = 184;                 // ширина блока со стилями
+    // размеры в логических пикселях; панель 244×276, вокруг поля под тень 0 6px 18px
+    public const float W = 244, H = 276;
+    const float ML = 18, MT = 12, MR = 18, MB = 24;
+    const float IN_X = 15, IN_W = 214;                 // ширина блоков с кубиками и стилями
 
     readonly DieWindow die;
     readonly double dpi;
@@ -22,8 +23,9 @@ sealed class MenuWindow : Form
     string hover, pressed;
 
     // где что лежит (от левого верхнего угла панели)
-    static RectangleF Swatch(int i) => new(IN_X + i * 39, 40, 32, 32);
-    static readonly RectangleF ItemTop = new(7, 89, 200, 31), ItemAuto = new(7, 122, 200, 31), ItemClose = new(7, 164, 200, 31);
+    static RectangleF Chip(int i) => new(IN_X + i * 31, 40, 28, 28);
+    static RectangleF Swatch(int i) => new(IN_X + i * 39, 114, 32, 32);
+    static readonly RectangleF ItemTop = new(7, 163, W - 14, 31), ItemAuto = new(7, 196, W - 14, 31), ItemClose = new(7, 238, W - 14, 31);
 
     public MenuWindow(DieWindow die, Point at)
     {
@@ -117,9 +119,26 @@ sealed class MenuWindow : Form
             using var small = new Font(Fonts.Ui, 11, GraphicsUnit.Pixel);
             using var num15 = new Font(Fonts.Num, 15, GraphicsUnit.Pixel);
 
+            // какой кубик: d4 … d20 и d100
+            DrawText(g, "Кубик", ui, Palette.Text, new RectangleF(IN_X, 15, IN_W, 17));
+            DrawText(g, die.Kind.Name, uiSemi, Palette.Gold, new RectangleF(IN_X, 15, IN_W, 17), StringAlignment.Far);
+            using (var chipFont = new Font(Fonts.Num, 11.5f, GraphicsUnit.Pixel))
+                for (int i = 0; i < DieKind.All.Length; i++)
+                {
+                    var k = DieKind.All[i];
+                    var r = Chip(i);
+                    bool on = k == die.Kind;
+                    if (hover == "k" + i) r.Offset(0, -1);
+                    using var shape = Shapes.Round(r, 7);
+                    using (var b = new SolidBrush(hover == "k" + i ? Color.FromArgb(34, 255, 255, 255) : Palette.Hover)) g.FillPath(b, shape);
+                    if (on) using (var pen = new Pen(Palette.Gold, 1.5f)) using (var border = Shapes.Round(RectangleF.Inflate(r, -0.75f, -0.75f), 6.25f)) g.DrawPath(pen, border);
+                    DrawText(g, k.Name, chipFont, on ? Palette.Gold : Palette.Text, r, StringAlignment.Center);
+                }
+            Sep(g, 79);
+
             // стиль кубика
-            DrawText(g, "Стиль кубика", ui, Palette.Text, new RectangleF(IN_X, 15, IN_W, 17));
-            DrawText(g, die.Style.Name, uiSemi, Palette.Gold, new RectangleF(IN_X, 15, IN_W, 17), StringAlignment.Far);
+            DrawText(g, "Стиль кубика", ui, Palette.Text, new RectangleF(IN_X, 89, IN_W, 17));
+            DrawText(g, die.Style.Name, uiSemi, Palette.Gold, new RectangleF(IN_X, 89, IN_W, 17), StringAlignment.Far);
             for (int i = 0; i < DieRenderer.Styles.Length; i++)
             {
                 var s = DieRenderer.Styles[i];
@@ -142,11 +161,11 @@ sealed class MenuWindow : Form
                 if (s.Id == p.Style)
                     using (var pen = new Pen(Palette.Gold, 2)) using (var border = Shapes.Round(RectangleF.Inflate(r, -1, -1), 8)) g.DrawPath(pen, border);
             }
-            Sep(g, 83);
+            Sep(g, 157);
 
             Item(g, ItemTop, "top", "Поверх всех окон", ui, p.OnTop);
             Item(g, ItemAuto, "auto", "Автобросок", ui, die.Auto);
-            Sep(g, 158);
+            Sep(g, 232);
             Item(g, ItemClose, "close", "Закрыть", ui, null);
             DrawText(g, "Esc×2", small, Palette.Muted, new RectangleF(ItemClose.X + 8, ItemClose.Y, ItemClose.Width - 16, ItemClose.Height), StringAlignment.Far);
         }
@@ -181,7 +200,7 @@ sealed class MenuWindow : Form
     static void Sep(Graphics g, float y)
     {
         using var b = new SolidBrush(Palette.PanelLine);
-        g.FillRectangle(b, 11, y, 192, 1);
+        g.FillRectangle(b, 11, y, W - 22, 1);
     }
 
     static void DrawText(Graphics g, string s, Font f, Color c, RectangleF r, StringAlignment align = StringAlignment.Near)
@@ -196,6 +215,7 @@ sealed class MenuWindow : Form
 
     string Hit(PointF p)
     {
+        for (int i = 0; i < DieKind.All.Length; i++) if (Chip(i).Contains(p)) return "k" + i;
         for (int i = 0; i < DieRenderer.Styles.Length; i++) if (Swatch(i).Contains(p)) return "s" + i;
         if (ItemTop.Contains(p)) return "top";
         if (ItemAuto.Contains(p)) return "auto";
@@ -227,6 +247,7 @@ sealed class MenuWindow : Form
         pressed = null;
         if (!click) return;
         if (h[0] == 's' && h.Length == 2) die.SetStyle(DieRenderer.Styles[h[1] - '0'].Id);
+        else if (h[0] == 'k' && h.Length == 2) die.SetKind(DieKind.All[h[1] - '0'].Id);
         else if (h == "top") die.ToggleOnTop();
         else if (h == "auto")
         {

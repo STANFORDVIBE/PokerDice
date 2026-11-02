@@ -1,4 +1,5 @@
-// Кубик рисуется лучами прямо на процессоре, без видеокарты и браузера: форма — куб со скруглёнными рёбрами,
+// Кубик рисуется лучами прямо на процессоре, без видеокарты и браузера: форма — куб со скруглёнными рёбрами
+// или многогранник (d4–d20, см. DieKind),
 // свет — та же «студия», что была в three.js (софтбокс, отражённый свет от стола, рассеянная подсветка),
 // материал — глянцевый лак поверх корпуса, цифры — матовая гравировка. Рисуем только во время анимации.
 using System.Drawing.Drawing2D;
@@ -25,16 +26,11 @@ sealed unsafe class DieRenderer
         double x2 = x * x, x4 = x2 * x2, x8 = x4 * x4, x16 = x8 * x8;
         return x16 * x4 * x2 * x;
     }
-    const double BOUND = 0.87;                           // радиус шара, в который влезает кубик
-    const int TEX = 512, LEVELS = 5;
+    const int TEX = 512, LEVELS = 5;                     // TEX — текстура корпуса (на всю ширину надписи)
 
     public static readonly M3 TILT = M3.RotX(20 * Math.PI / 180);           // смотрим на кубик чуть сверху
     public static readonly M3 VIEW = TILT * M3.RotY(-26 * Math.PI / 180);
-    // повороты, которые выводят грань i лицом к зрителю
-    public static readonly M3[] TO_FRONT =
-        { M3.RotY(0), M3.RotY(Math.PI), M3.RotY(-Math.PI / 2), M3.RotY(Math.PI / 2), M3.RotX(Math.PI / 2), M3.RotX(-Math.PI / 2) };
-    static readonly V3[] FU = new V3[6], FV = new V3[6], FN = new V3[6];
-    static readonly int[] FACE_OF = new int[6];          // ось +x, −x, +y, −y, +z, −z → номер грани
+    static readonly int[] FACE_OF = new int[6];          // у куба: ось +x, −x, +y, −y, +z, −z → номер грани
 
     // ---------- свет ----------
     static readonly V3 ROOM = Lin("#e4e2de") * 0.3, SOFTBOX = new V3(3.2, 3.2, 3.2), TABLE = Lin("#c9c2b6") * 0.25;
@@ -54,15 +50,10 @@ sealed unsafe class DieRenderer
     static DieRenderer()
     {
         V3[] axes = { new(1, 0, 0), new(-1, 0, 0), new(0, 1, 0), new(0, -1, 0), new(0, 0, 1), new(0, 0, -1) };
+        var cube = DieKind.Default;
         for (int i = 0; i < 6; i++)
-        {
-            var place = TO_FRONT[i].T;                   // где грань сидит на кубике
-            var normal = FN[i] = place * new V3(0, 0, 1);
-            FU[i] = place * new V3(1, 0, 0);
-            FV[i] = place * new V3(0, 1, 0);
             for (int a = 0; a < 6; a++)
-                if (V3.Dot(normal, axes[a]) > 0.9) FACE_OF[a] = i;
-        }
+                if (V3.Dot(cube.N[i], axes[a]) > 0.9) FACE_OF[a] = i;
         var (t, b) = Basis(KEY_W);
         for (int j = 0; j < 4; j++)
         {
@@ -185,7 +176,8 @@ sealed unsafe class DieRenderer
     // ---------- текстуры граней ----------
     // цифры: [грань][уровень детализации], на тексель четыре байта — заливка цифры, глубина канавки
     // и наклон её стенок по x и y (128 — ровно)
-    readonly byte[][][] masks = new byte[6][][];
+    byte[][][] masks;
+    DieKind kind;
     byte[][] body;                                   // корпус с зерном, sRGB, по уровням детализации
     readonly byte[] grain = new byte[TEX * TEX * 4]; // зерно и пятна, как у кости (RGBA с предумноженной альфой)
     V3 ink;                                          // цвет цифр, sRGB 0..255
@@ -204,16 +196,19 @@ sealed unsafe class DieRenderer
             float v = rnd.NextDouble() < 0.5 ? 0 : 1, a = (float)(rnd.NextDouble() * 10 / 255);   // мелкое зерно, еле заметное
             g[i * 4] = g[i * 4 + 1] = g[i * 4 + 2] = v * a; g[i * 4 + 3] = a;
         }
-        for (int n = 0; n < 14; n++)                  // мягкие пятна: кость окрашена чуть неровно
+        // мягкие пятна: кость окрашена чуть неровно. Пятна переходят через край на другую сторону —
+        // текстура без швов, на больших гранях многогранников её можно класть плиткой
+        for (int n = 0; n < 14; n++)
         {
             double cx = rnd.NextDouble() * TEX, cy = rnd.NextDouble() * TEX, r = TEX * (0.15 + rnd.NextDouble() * 0.3);
             var col = rnd.NextDouble() < 0.5 ? new V3(150, 120, 80) : new V3(255, 255, 250);
-            for (int y = Math.Max(0, (int)(cy - r)); y < Math.Min(TEX, (int)(cy + r) + 1); y++)
-                for (int x = Math.Max(0, (int)(cx - r)); x < Math.Min(TEX, (int)(cx + r) + 1); x++)
+            for (int yy = (int)(cy - r); yy < (int)(cy + r) + 1; yy++)
+                for (int xx = (int)(cx - r); xx < (int)(cx + r) + 1; xx++)
                 {
-                    double d = Math.Sqrt((x + 0.5 - cx) * (x + 0.5 - cx) + (y + 0.5 - cy) * (y + 0.5 - cy)) / r;
+                    double d = Math.Sqrt((xx + 0.5 - cx) * (xx + 0.5 - cx) + (yy + 0.5 - cy) * (yy + 0.5 - cy)) / r;
                     if (d >= 1) continue;
                     float a = (float)(0.06 * (1 - d));
+                    int x = ((xx % TEX) + TEX) % TEX, y = ((yy % TEX) + TEX) % TEX;
                     int i = (y * TEX + x) * 4;
                     g[i] = (float)(col.X / 255 * a + g[i] * (1 - a));
                     g[i + 1] = (float)(col.Y / 255 * a + g[i + 1] * (1 - a));
@@ -235,15 +230,15 @@ sealed unsafe class DieRenderer
             top[i * 3 + 1] = (byte)Math.Round(s.Body.G * (1 - a) + grain[i * 4 + 1] * s.Grain);
             top[i * 3 + 2] = (byte)Math.Round(s.Body.B * (1 - a) + grain[i * 4 + 2] * s.Grain);
         }
-        body = Mips(top, 3);
+        body = Mips(top, TEX, 3);
     }
 
     // уровни детализации: каждый следующий вдвое меньше — мелкий кубик без ряби в цифрах
-    static byte[][] Mips(byte[] top, int ch)
+    static byte[][] Mips(byte[] top, int size, int ch)
     {
         var levels = new byte[LEVELS][];
         levels[0] = top;
-        for (int l = 1, s = TEX / 2; l < LEVELS; l++, s /= 2)
+        for (int l = 1, s = size / 2; l < LEVELS; l++, s /= 2)
         {
             var src = levels[l - 1]; var dst = new byte[s * s * ch]; int ss = s * 2;
             for (int y = 0; y < s; y++)
@@ -256,27 +251,37 @@ sealed unsafe class DieRenderer
         return levels;
     }
 
-    // число, которое вверх ногами читается как другое число 1–100
-    static bool FlipsTo(string text)
+    // число, которое вверх ногами читается как другое число на этом же кубике
+    static bool FlipsTo(string text, int max)
     {
         var turn = new Dictionary<char, char> { ['0'] = '0', ['1'] = '1', ['6'] = '9', ['8'] = '8', ['9'] = '6' };
         if (!text.All(turn.ContainsKey)) return false;
         var r = new string(text.Reverse().Select(c => turn[c]).ToArray());
-        return r != text && r[0] != '0' && int.Parse(r) is >= 1 and <= 100;
+        return r != text && r[0] != '0' && int.Parse(r) is var n && n >= 1 && n <= max;
+    }
+
+    // другой кубик: у d4–d20 и d6 числа на гранях постоянные — рисуем их сразу
+    public void SetKind(DieKind k)
+    {
+        kind = k;
+        masks = new byte[k.Faces][][];
+        if (!k.Random) SetNumbers(k.Label);
     }
 
     static FontFamily numFont;
     public void SetNumbers(int[] nums)
     {
         numFont ??= Fonts.Family("Segoe UI Semibold", "Segoe UI");
+        int TEX = kind.Tex;
         using var bmp = new Bitmap(TEX, TEX, PixelFormat.Format32bppArgb);
         using var gr = Graphics.FromImage(bmp);
         gr.SmoothingMode = SmoothingMode.HighQuality;
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < kind.Faces; i++)
         {
             gr.Clear(Color.Transparent);
             string text = nums[i].ToString();
-            float fs = TEX * 0.34f;
+            // на гранях многогранников места меньше, чем в квадрате надписи куба, — цифры крупнее в своём круге
+            float fs = TEX * (kind.Cube ? 0.34f : 0.42f), fit = TEX * (kind.Cube ? 0.6f : 0.68f);
             GraphicsPath Path(float size)
             {
                 var p = new GraphicsPath();
@@ -285,7 +290,7 @@ sealed unsafe class DieRenderer
             }
             var path = Path(fs);
             var bb = path.GetBounds();
-            if (bb.Width > TEX * 0.6f) { fs *= TEX * 0.6f / bb.Width; path.Dispose(); path = Path(fs); bb = path.GetBounds(); }
+            if (bb.Width > fit) { fs *= fit / bb.Width; path.Dispose(); path = Path(fs); bb = path.GetBounds(); }
             using (var mt = new Matrix())
             {
                 mt.Translate(TEX / 2f - (bb.X + bb.Width / 2), TEX / 2f - (bb.Y + bb.Height / 2));
@@ -294,7 +299,7 @@ sealed unsafe class DieRenderer
             gr.FillPath(Brushes.White, path);
             path.Dispose();
             // черта снизу, как на настоящих костях: 6 и 9, 68 и 89 вверх ногами не перепутать
-            if (FlipsTo(text))
+            if (FlipsTo(text, kind.Sides))
             {
                 float lw = bb.Width * 0.7f, lh = fs * 0.055f, y = TEX / 2f + bb.Height / 2 + fs * 0.12f;
                 using var line = Shapes.Round(new RectangleF(TEX / 2f - lw / 2, y, lw, lh), lh / 2);
@@ -308,24 +313,24 @@ sealed unsafe class DieRenderer
                 for (int x = 0; x < TEX; x++) top[y * TEX + x] = row[x * 4 + 3];
             }
             bmp.UnlockBits(data);
-            masks[i] = Engrave(top);
+            masks[i] = Engrave(top, TEX, (int)Math.Round(GROOVE * TEX / kind.W));
         }
     }
 
     // канавка под цифрой: глубина — размытая маска, стенки идут по обе стороны контура. Краска — строго по цифре,
     // так что она не худеет, а снаружи у контура видна кромка: тень с одной стороны и блик с другой
-    static byte[][] Engrave(byte[] top)
+    static byte[][] Engrave(byte[] top, int TEX, int groove)
     {
         var blur = new float[TEX * TEX];
         for (int i = 0; i < blur.Length; i++) blur[i] = top[i] / 255f;
-        for (int pass = 0; pass < 2; pass++) { BoxBlur(blur, true); BoxBlur(blur, false); }
+        for (int pass = 0; pass < 2; pass++) { BoxBlur(blur, TEX, groove, true); BoxBlur(blur, TEX, groove, false); }
         var depth = new byte[TEX * TEX];
         for (int i = 0; i < depth.Length; i++)
         {
             double t = Math.Clamp((blur[i] - 0.12) / 0.7, 0, 1);
             depth[i] = (byte)Math.Round(255 * t * t * (3 - 2 * t));
         }
-        byte[][] mm = Mips(top, 1), dm = Mips(depth, 1), levels = new byte[LEVELS][];
+        byte[][] mm = Mips(top, TEX, 1), dm = Mips(depth, TEX, 1), levels = new byte[LEVELS][];
         for (int l = 0, s = TEX; l < LEVELS; l++, s /= 2)
         {
             var d = dm[l]; var o = levels[l] = new byte[s * s * 4];
@@ -343,8 +348,8 @@ sealed unsafe class DieRenderer
         return levels;
     }
 
-    const int GROOVE = 5;                            // ширина стенки канавки, текселей
-    static void BoxBlur(float[] a, bool horiz)
+    const double GROOVE = 5 / 512.0;                 // ширина стенки канавки (ребро куба — 1)
+    static void BoxBlur(float[] a, int TEX, int GROOVE, bool horiz)
     {
         Parallel.For(0, TEX, line =>
         {
@@ -399,10 +404,11 @@ sealed unsafe class DieRenderer
         return t > 1e19 ? -1 : t;
     }
 
+
     // проходит ли луч рядом с кубиком вообще (дешёвая проверка перед точной)
-    static bool NearBall(V3 o, V3 d)
+    bool NearBall(V3 o, V3 d)
     {
-        double b = V3.Dot(o, d), c = V3.Dot(o, o) - BOUND * BOUND;
+        double b = V3.Dot(o, d), c = V3.Dot(o, o) - kind.Bound * kind.Bound;
         return !(c > 0 && b > 0) && b * b - c >= 0;
     }
 
@@ -412,7 +418,7 @@ sealed unsafe class DieRenderer
 
     void Fetch(int face, int lvl, double u, double v, double w, ref Groove g)
     {
-        int s = TEX >> lvl; var m = masks[face][lvl];
+        int s = kind.Tex >> lvl; var m = masks[face][lvl];
         double fx = u * s - 0.5, fy = (1 - v) * s - 0.5;
         int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
         double tx = fx - x0, ty = fy - y0;
@@ -440,13 +446,14 @@ sealed unsafe class DieRenderer
         return g;
     }
 
+    // корпус повторяется плиткой: грань d4 больше квадрата надписи
     V3 SampleBody(int lvl, double u, double v)
     {
         int s = TEX >> lvl; var m = body[lvl];
         double fx = u * s - 0.5, fy = (1 - v) * s - 0.5;
         int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
         double tx = fx - x0, ty = fy - y0;
-        int xa = Math.Clamp(x0, 0, s - 1), xb = Math.Clamp(x0 + 1, 0, s - 1), ya = Math.Clamp(y0, 0, s - 1), yb = Math.Clamp(y0 + 1, 0, s - 1);
+        int xa = ((x0 % s) + s) % s, xb = (xa + 1) % s, ya = ((y0 % s) + s) % s, yb = (ya + 1) % s;
         V3 At(int x, int y) { int i = (y * s + x) * 3; return new(m[i], m[i + 1], m[i + 2]); }
         return V3.Lerp(V3.Lerp(At(xa, ya), At(xb, ya), tx), V3.Lerp(At(xa, yb), At(xb, yb), tx), ty);
     }
@@ -494,35 +501,42 @@ sealed unsafe class DieRenderer
     // keyL — направление на лампу в осях кубика, foot — сколько грани приходится на пиксель
     V3 Shade(V3 p, M3 m, M3 mT, V3 keyL, V3 view, double foot)
     {
-        var nl = new V3(Pow23(p.X * 2), Pow23(p.Y * 2), Pow23(p.Z * 2)).Norm();
-        double ax = Math.Abs(p.X), ay = Math.Abs(p.Y), az = Math.Abs(p.Z);
-        int axis = ax >= ay && ax >= az ? (p.X > 0 ? 0 : 1) : ay >= az ? (p.Y > 0 ? 2 : 3) : (p.Z > 0 ? 4 : 5);
-        int face = FACE_OF[axis];
-        double u = V3.Dot(p, FU[face]) + 0.5, v = V3.Dot(p, FV[face]) + 0.5;
+        V3 nl; int face;
+        if (kind.Cube)
+        {
+            nl = new V3(Pow23(p.X * 2), Pow23(p.Y * 2), Pow23(p.Z * 2)).Norm();
+            double ax = Math.Abs(p.X), ay = Math.Abs(p.Y), az = Math.Abs(p.Z);
+            face = FACE_OF[ax >= ay && ax >= az ? (p.X > 0 ? 0 : 1) : ay >= az ? (p.Y > 0 ? 2 : 3) : (p.Z > 0 ? 4 : 5)];
+        }
+        else (face, nl) = kind.Surface(p);
+        // надпись — квадрат со стороной W вокруг центра грани; u, v — доли этого квадрата
+        V3 fu = kind.U[face], fv = kind.V[face], fn = kind.N[face];
+        double W = kind.W;
+        double u = V3.Dot(p - kind.C[face], fu) / W + 0.5, v = V3.Dot(p - kind.C[face], fv) / W + 0.5;
 
         // пятно пикселя на грани: поперёк взгляда — foot, вдоль наклона — foot / cos
         var lv = mT * view;
-        double pu = V3.Dot(lv, FU[face]), pv = V3.Dot(lv, FV[face]), pl = Math.Sqrt(pu * pu + pv * pv);
-        double stretch = 1 / Math.Max(Math.Abs(V3.Dot(lv, FN[face])), 0.1);
+        double pu = V3.Dot(lv, fu), pv = V3.Dot(lv, fv), pl = Math.Sqrt(pu * pu + pv * pv);
+        double stretch = 1 / Math.Max(Math.Abs(V3.Dot(lv, fn)), 0.1);
         int taps = Math.Min((int)Math.Ceiling(stretch - 0.05), 8);
-        double lod = Math.Log2(foot * TEX), au = 0, av = 0;
-        if (taps > 1 && pl > 1e-6) { au = pu / pl * foot * stretch; av = pv / pl * foot * stretch; }
+        double lod = Math.Log2(foot * kind.Tex / W), au = 0, av = 0;
+        if (taps > 1 && pl > 1e-6) { au = pu / pl * foot * stretch / W; av = pv / pl * foot * stretch / W; }
         else taps = 1;
         var gr = SampleGroove(face, u, v, lod, au, av, taps);
         double mask = gr.Ink;
-        int lvl = Math.Clamp((int)Math.Round(lod), 0, LEVELS - 1);
+        int lvl = Math.Clamp((int)Math.Round(Math.Log2(foot * TEX / W)), 0, LEVELS - 1);
 
         // стенки канавки наклоняют нормаль внутрь цифры. На мелком кубике стенки мельче пикселя
         // и только мылят цифру — там рельеф слабее
-        double relief = Math.Clamp(3.6 - lod, 0.3, 1);
-        nl = (nl + (FU[face] * gr.Du + FV[face] * gr.Dv) * (DEEP * relief)).Norm();
+        double relief = Math.Clamp(3.6 - Math.Log2(foot * TEX), 0.3, 1);
+        nl = (nl + (fu * gr.Du + fv * gr.Dv) * (DEEP * relief / W)).Norm();
         // у стенки, что ближе к лампе, канавка в её тени; в глубине и рассеянного света меньше
         double shadow = 0, ao = 1 - 0.2 * gr.Depth * relief;
-        double ln = V3.Dot(keyL, FN[face]);
+        double ln = V3.Dot(keyL, fn);
         if (gr.Depth > 0.02 && ln > 0.05)
         {
-            double k = DEEP * gr.Depth / ln;
-            var sh = SampleGroove(face, u + V3.Dot(keyL, FU[face]) * k, v + V3.Dot(keyL, FV[face]) * k, lod, 0, 0, 1);
+            double k = DEEP * gr.Depth / ln / W;
+            var sh = SampleGroove(face, u + V3.Dot(keyL, fu) * k, v + V3.Dot(keyL, fv) * k, lod, 0, 0, 1);
             shadow = Math.Clamp((gr.Depth - sh.Depth) * 2, 0, 1) * relief;
             ao *= 1 - 0.35 * shadow;
         }
@@ -567,6 +581,36 @@ sealed unsafe class DieRenderer
 
     static double Out(double c) => toSrgb[(int)(Math.Clamp(c, 0, 1) * 4096)];
 
+    // выпуклая оболочка точек на полу (против часовой) и попадание точки в неё
+    static (double x, double z)[] Hull(IEnumerable<(double x, double z)> pts)
+    {
+        var p = pts.OrderBy(q => q.x).ThenBy(q => q.z).ToArray();
+        var h = new (double x, double z)[p.Length * 2]; int k = 0;
+        static double Cross((double x, double z) o, (double x, double z) a, (double x, double z) b) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+        for (int i = 0; i < p.Length; i++) { while (k >= 2 && Cross(h[k - 2], h[k - 1], p[i]) <= 0) k--; h[k++] = p[i]; }
+        for (int i = p.Length - 2, lo = k + 1; i >= 0; i--) { while (k >= lo && Cross(h[k - 2], h[k - 1], p[i]) <= 0) k--; h[k++] = p[i]; }
+        return h[..(k - 1)];
+    }
+
+    static bool Inside((double x, double z)[] h, double x, double z)
+    {
+        for (int i = 0, j = h.Length - 1; i < h.Length; j = i++)
+            if ((h[i].x - h[j].x) * (z - h[j].z) - (h[i].z - h[j].z) * (x - h[j].x) < 0) return false;
+        return true;
+    }
+
+    // насколько точка внутри выпуклого многоугольника: расстояние до ближайшей стороны (снаружи — меньше нуля)
+    static double Depth((double x, double z)[] h, double x, double z)
+    {
+        double min = double.MaxValue;
+        for (int i = 0, j = h.Length - 1; i < h.Length; j = i++)
+        {
+            double ex = h[i].x - h[j].x, ez = h[i].z - h[j].z;
+            min = Math.Min(min, (ex * (z - h[j].z) - ez * (x - h[j].x)) / Math.Sqrt(ex * ex + ez * ez));
+        }
+        return min;
+    }
+
     // ---------- кадр ----------
     // половина ядер: кадр и так быстрый, а лишние потоки только жгут процессор в ожидании работы
     static readonly ParallelOptions Par = new() { MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2) };
@@ -583,9 +627,19 @@ sealed unsafe class DieRenderer
         var rw = TILT.T * m; var rwT = rw.T;             // поворот кубика в «мире»
         var lo = mT * (o - cv);                          // камера в осях кубика
         var keyL = mT * KEY_V;                           // лампа в осях кубика
+        var gaps = kind.Cube ? null : kind.Gaps(lo);
+        // тень многогранника на полу — выпуклый многоугольник из теней вершин, по одному на каждый луч размытой лампы
+        var shadows = kind.Cube ? null : KEY_J.Select(j => Hull(kind.Verts.Select(c =>
+        {
+            var p = cw + rw * c;
+            var q = p - j * ((p.Y - kind.Floor) / j.Y);
+            return (q.X, q.Z);
+        }))).ToArray();
+        double Hit(V3 d) => !NearBall(lo, d) ? -1 : kind.Cube ? Box(lo, d) : kind.Hit(d, gaps);
         double perT = 1 / (k * DIST);                    // размер пикселя на расстоянии 1 от камеры
         var floorN = TILT * new V3(0, 1, 0);
-        var floorP = TILT * new V3(0, -0.5, 0);
+        double floorY = kind.Floor;
+        var floorP = TILT * new V3(0, floorY, 0);
         double blobR = 0.8 * (1 - 0.4 * hop), blobA = 1 - 0.6 * hop;
 
         // где что может быть на экране: рамки кубика, пятна под ним и тени от лампы — лучи пускаем только туда
@@ -599,19 +653,26 @@ sealed unsafe class DieRenderer
             }
             return RectangleF.FromLTRB((float)fx0 - 2, (float)fy0 - 2, (float)fx1 + 3, (float)fy1 + 3);
         }
-        var corners = new List<V3>();
-        foreach (var cx in new[] { -0.5, 0.5 }) foreach (var cy in new[] { -0.5, 0.5 }) foreach (var cz in new[] { -0.5, 0.5 })
-            corners.Add(new V3(cx, cy, cz));
+        var corners = kind.Verts;
         var cubeBox = Frame(corners.Select(c => cv + m * c));
-        var blobBox = Frame(new[] { (-1, -1), (-1, 1), (1, -1), (1, 1) }.Select(q => TILT * new V3(q.Item1 * blobR, -0.5, q.Item2 * blobR)));
+        var blobBox = Frame(new[] { (-1, -1), (-1, 1), (1, -1), (1, 1) }.Select(q => TILT * new V3(q.Item1 * blobR, floorY, q.Item2 * blobR)));
         var shadowBox = Frame(corners.Select(c =>
         {
             var p = cw + rw * c;                         // угол кубика в «мире» → по лучу лампы на пол
-            return TILT * (p - KEY_W * ((p.Y + 0.5) / KEY_W.Y));
+            return TILT * (p - KEY_W * ((p.Y - floorY) / KEY_W.Y));
         }));
         shadowBox.Inflate((float)(0.06 * k), (float)(0.06 * k));   // размытый край тени
         var all = RectangleF.Union(cubeBox, RectangleF.Union(blobBox, shadowBox));
         var rect = Rectangle.FromLTRB(Math.Max(0, (int)all.Left), Math.Max(0, (int)all.Top), Math.Min(w, (int)all.Right), Math.Min(h, (int)all.Bottom));
+        // силуэт многогранника на экране: пиксели глубоко внутри него точно целиком на кубике — им хватит одного луча.
+        // Запас — на скругление рёбер (оно чуть ужимает силуэт) и на сдвиг лучей внутри пикселя
+        var sil = kind.Cube ? null : Hull(corners.Select(c =>
+        {
+            var p = cv + m * c;
+            double sc = k * DIST / (DIST - p.Z);
+            return (w / 2.0 + p.X * sc, h / 2.0 - p.Y * sc);
+        }));
+        double inset = 0.025 * k * 1.2 + 1.5;
         float cbL = cubeBox.Left, cbT = cubeBox.Top, cbR = cubeBox.Right, cbB = cubeBox.Bottom;
         float bbL = blobBox.Left, bbT = blobBox.Top, bbR = blobBox.Right, bbB = blobBox.Bottom;
         float sbL = shadowBox.Left, sbT = shadowBox.Top, sbR = shadowBox.Right, sbB = shadowBox.Bottom;
@@ -627,6 +688,17 @@ sealed unsafe class DieRenderer
             {
                 bool inCube = rowCube && x >= cbL && x <= cbR, inBlob = rowBlob && x >= bbL && x <= bbR, inShadow = rowShadow && x >= sbL && x <= sbR;
                 if (!inCube && !inBlob && !inShadow) continue;
+                if (sil != null && inCube && Depth(sil, x + 0.5, y + 0.5) > inset)
+                {
+                    var d = Ray(x + 0.5, y + 0.5);
+                    double t = Hit(mT * d);
+                    if (t > 0)
+                    {
+                        var c = Shade(lo + mT * d * t, m, mT, keyL, -d, t * perT);
+                        row[x] = 0xFF000000u | (uint)c.X << 16 | (uint)c.Y << 8 | (uint)c.Z;
+                        continue;
+                    }
+                }
                 // сглаживание: четыре луча на пиксель; если все попали в кубик — красим один раз по центру
                 double r = 0, g = 0, b = 0, a = 0;
                 int hits = 0;
@@ -634,13 +706,14 @@ sealed unsafe class DieRenderer
                 {
                     if (!inCube) { hitT[s] = -1; continue; }
                     var ld = mT * Ray(x + SUB[s].x, y + SUB[s].y);
-                    hitT[s] = NearBall(lo, ld) ? Box(lo, ld) : -1;
+                    hitT[s] = Hit(ld);
                     if (hitT[s] > 0) hits++;
                 }
                 if (hits == 4)
                 {
+                    // у куба — луч через центр пикселя; многогранник считать дороже, берём первый из четырёх
                     var d = Ray(x + 0.5, y + 0.5); var ld = mT * d;
-                    double t = Box(lo, ld);
+                    double t = kind.Cube ? Hit(ld) : -1;
                     if (t <= 0) { d = Ray(x + SUB[0].x, y + SUB[0].y); ld = mT * d; t = hitT[0]; }
                     var c = Shade(lo + ld * t, m, mT, keyL, -d, t * perT);
                     row[x] = 0xFF000000u | (uint)c.X << 16 | (uint)c.Y << 8 | (uint)c.Z;
@@ -665,8 +738,10 @@ sealed unsafe class DieRenderer
                     if (dist < 1) fa = (dist < 0.45 ? 0.5 - 0.3 * dist / 0.45 : 0.2 * (1 - dist) / 0.55) * blobA;
                     if (inShadow)
                     {
-                        var so = rwT * (pw - cw); var sd = rwT * KEY_J[s];
-                        if (NearBall(so, sd) && Box(so, sd) > 0) fa += 0.12 * (1 - fa);
+                        bool dark;
+                        if (kind.Cube) { var so = rwT * (pw - cw); var sd = rwT * KEY_J[s]; dark = NearBall(so, sd) && Box(so, sd) > 0; }
+                        else dark = Inside(shadows[s], pw.X, pw.Z);
+                        if (dark) fa += 0.12 * (1 - fa);
                     }
                     a += fa * 255;
                 }

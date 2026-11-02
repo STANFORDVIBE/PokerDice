@@ -7,6 +7,7 @@ sealed class Prefs
 {
     public double Scale { get; set; } = 1;
     public string Style { get; set; } = "classic";
+    public string Die { get; set; } = DieKind.Default.Id;
     public bool OnTop { get; set; }
     public int? Cx { get; set; }              // центр кубика на экране
     public int? Cy { get; set; }
@@ -30,6 +31,7 @@ sealed class Prefs
         catch { }
         p.Scale = Math.Round(Math.Clamp(p.Scale, 0.5, 2.5), 1);
         if (DieRenderer.Styles.All(s => s.Id != p.Style)) p.Style = "classic";
+        if (DieKind.All.All(k => k.Id != p.Die)) p.Die = DieKind.Default.Id;
         return p;
     }
 
