@@ -14,7 +14,8 @@
     <Description>Кубик 1–100 для смешанных стратегий</Description>
     <ApplicationIcon>..\icon.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- без этого смена раскладки на русскую роняет кубик: WinForms спрашивает язык по его коду -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <SatelliteResourceLanguages>ru</SatelliteResourceLanguages>
     <!-- поменьше памяти: сборщик мусора без фоновых потоков и с экономией -->
     <ServerGarbageCollection>false</ServerGarbageCollection>

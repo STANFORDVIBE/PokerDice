@@ -6,7 +6,7 @@ namespace PokerDice;
 static class Native
 {
     public const int WS_EX_LAYERED = 0x80000, WS_EX_TOOLWINDOW = 0x80;
-    public const int WM_HOTKEY = 0x312, WM_NCHITTEST = 0x84, WM_MOUSEACTIVATE = 0x21;
+    public const int WM_HOTKEY = 0x312, WM_INPUTLANGCHANGE = 0x51, WM_NCHITTEST = 0x84, WM_MOUSEACTIVATE = 0x21;
     public const int MOD_NOREPEAT = 0x4000, VK_PRIOR = 0x21;
     public static readonly IntPtr HWND_TOPMOST = new(-1), HWND_NOTOPMOST = new(-2), HWND_BROADCAST = new(0xffff);
     public const uint SWP_NOSIZE = 1, SWP_NOMOVE = 2, SWP_NOACTIVATE = 0x10;
@@ -38,6 +38,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int RegisterWindowMessage(string name);
 }
 

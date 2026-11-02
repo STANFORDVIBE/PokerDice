@@ -36,6 +36,9 @@ static class Program
         using var die = new DieWindow();
         var handle = die.Handle;                     // окно создано, но не показано
         Console.WriteLine($"start {sw.ElapsedMilliseconds} ms");
+        // смена раскладки на русскую (код 1049): раньше роняла кубик с ошибкой про культуру
+        Native.SendMessage(handle, Native.WM_INPUTLANGCHANGE, (IntPtr)204, (IntPtr)0x04190419);
+        Console.WriteLine("lang change OK");
         die.Snapshot(false).Save(Path.Combine(dir, "idle.png"));
         sw.Restart();
         var cpu = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
