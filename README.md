@@ -39,3 +39,7 @@ dotnet publish native -c Release -r win-x64 --self-contained false -p:PublishRea
 C# + WinForms (`native/`), кубик рисуется лучами на процессоре — без браузера и видеокарты, ~30 МБ памяти.
 Настройки — `%APPDATA%\PokerDice\prefs.json`. Проверка без окна: `PokerDice.exe --shot <папка>` —
 сохраняет картинки кубика и меню и проверяет броски, меню у краёв экрана и автобросок.
+
+## Лицензия
+
+[MIT](LICENSE)
