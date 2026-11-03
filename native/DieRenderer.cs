@@ -288,8 +288,9 @@ sealed unsafe class DieRenderer
             float fs = TEX * (kind.Cube ? 0.34f : 0.42f), fit = TEX * (kind.Cube ? 0.6f : 0.68f);
             GraphicsPath Path(float size)
             {
-                var p = new GraphicsPath();
+                var p = new GraphicsPath(FillMode.Winding);   // подставка у единицы сливается с ножкой, а не вырезает её
                 p.AddString(text, numFont, 0, size, new PointF(0, 0), StringFormat.GenericTypographic);
+                if (text.Contains('1')) AddFeet(gr, p, text, size);
                 return p;
             }
             var path = Path(fs);
@@ -318,6 +319,37 @@ sealed unsafe class DieRenderer
             }
             bmp.UnlockBits(data);
             masks[i] = Engrave(top, TEX, (int)Math.Round(GROOVE * TEX / kind.W));
+        }
+    }
+
+    // единица с подставкой, как на настоящих костях: у шрифта она — палочка с флажком, и на боковой грани
+    // её не отличить от 7 или черты. Подставка — под ножкой каждой «1» в числе
+    static void AddFeet(Graphics gr, GraphicsPath p, string text, float size)
+    {
+        using var font = new Font(numFont, size, GraphicsUnit.Pixel);
+        var box = new RectangleF(0, 0, size * 10, size * 2);
+        float Left(string s, int at)
+        {
+            using var fmt = new StringFormat(StringFormat.GenericTypographic);
+            fmt.SetMeasurableCharacterRanges(new[] { new CharacterRange(at, 1) });
+            var r = gr.MeasureCharacterRanges(s, font, box, fmt);
+            float x = r[0].GetBounds(gr).X;
+            foreach (var reg in r) reg.Dispose();
+            return x;
+        }
+        RectangleF one;
+        using (var g1 = new GraphicsPath())
+        {
+            g1.AddString("1", numFont, 0, size, new PointF(0, 0), StringFormat.GenericTypographic);
+            one = g1.GetBounds();
+        }
+        float stem = size * 0.13f, w = size * 0.32f, h = size * 0.075f, base1 = Left("1", 0);
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '1') continue;
+            float cx = one.Right - stem / 2 + Left(text, i) - base1;
+            using var foot = Shapes.Round(new RectangleF(cx - w / 2, one.Bottom - h, w, h), h * 0.3f);
+            p.AddPath(foot, false);
         }
     }
 
