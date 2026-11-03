@@ -30,6 +30,10 @@ sealed unsafe class DieRenderer
 
     public static readonly M3 TILT = M3.RotX(20 * Math.PI / 180);           // смотрим на кубик чуть сверху
     public static readonly M3 VIEW = TILT * M3.RotY(-26 * Math.PI / 180);
+    // у многогранников грани стоят теснее, чем у куба: повернёшь как куб — соседняя грань (у d10) смотрит
+    // на зрителя прямее выпавшей. Им — поворот поменьше, выпавшая грань почти анфас
+    static readonly M3 VIEW_POLY = M3.RotX(10 * Math.PI / 180) * M3.RotY(-12 * Math.PI / 180);
+    public static M3 ViewOf(DieKind k) => k.Cube ? VIEW : VIEW_POLY;
     static readonly int[] FACE_OF = new int[6];          // у куба: ось +x, −x, +y, −y, +z, −z → номер грани
 
     // ---------- свет ----------

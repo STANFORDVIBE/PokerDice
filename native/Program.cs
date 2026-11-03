@@ -63,8 +63,12 @@ static class Program
         {
             die.SetKind(k.Id);
             bool faces = k.ToFront.Select((m, i) => (m * k.N[i] - new V3(0, 0, 1)).Length).Max() < 1e-9;
+            // выпавшая грань смотрит на зрителя прямее всех остальных
+            var view = DieRenderer.ViewOf(k);
+            bool front = Enumerable.Range(0, k.Faces).All(f => Enumerable.Range(0, k.Faces)
+                .All(o => o == f || (view * k.ToFront[f] * k.N[o]).Z < (view * k.ToFront[f] * k.N[f]).Z - 0.05));
             bool labels = k.Random || k.Label.OrderBy(x => x).SequenceEqual(Enumerable.Range(1, k.Sides));
-            Console.WriteLine($"{k.Id}: faces {(faces ? "OK" : "FAIL")}, numbers {(labels ? "OK" : "FAIL")}, frame at 100% {die.Bench(1, 10):F1} ms, at 250% {die.Bench(2.5, 10):F1} ms");
+            Console.WriteLine($"{k.Id}: faces {(faces ? "OK" : "FAIL")}, result in front {(front ? "OK" : "FAIL")}, numbers {(labels ? "OK" : "FAIL")}, frame at 100% {die.Bench(1, 10):F1} ms, at 250% {die.Bench(2.5, 10):F1} ms");
             die.Snapshot(true).Save(Path.Combine(dir, $"kind-{k.Id}.png"));
             die.Closeup(1).Save(Path.Combine(dir, $"kind-{k.Id}-100.png"));
             die.Closeup(2.5).Save(Path.Combine(dir, $"kind-{k.Id}-250.png"));

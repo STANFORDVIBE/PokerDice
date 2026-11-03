@@ -86,7 +86,7 @@ sealed unsafe class DieWindow : Form
         }
         else face = Array.IndexOf(Kind.Label, Kind.Sides);
         anim = null; hop = 0;
-        orient = shown = DieRenderer.VIEW * Kind.ToFront[face];
+        orient = shown = DieRenderer.ViewOf(Kind) * Kind.ToFront[face];
     }
 
     protected override CreateParams CreateParams
@@ -222,7 +222,7 @@ sealed unsafe class DieWindow : Form
 
         // из текущего положения в целевое вокруг одной оси (+ полные обороты — они не меняют, где кончим)
         var end = Kind.ToFront[face];
-        var (axis, angle) = (DieRenderer.VIEW.T * orient * end.T).AxisAngle();
+        var (axis, angle) = (DieRenderer.ViewOf(Kind).T * orient * end.T).AxisAngle();
         double sign = Rng.Next(2) == 1 ? 1 : -1;
         var a = new Anim { Kind = kind, Axis = axis, Angle = angle, End = end, T0 = clock.Elapsed.TotalMilliseconds };
         switch (kind)
@@ -250,7 +250,7 @@ sealed unsafe class DieWindow : Form
     void Pose(Anim a, double t)
     {
         static double Out(double x, double p) => 1 - Math.Pow(1 - Math.Clamp(x, 0, 1), p);
-        var view = DieRenderer.VIEW;
+        var view = DieRenderer.ViewOf(Kind);
         switch (a.Kind)
         {
             case Throw.Spin:                         // кручение с подскоками
