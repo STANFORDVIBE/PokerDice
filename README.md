@@ -10,7 +10,7 @@
 
 ## Запуск
 
-Скачать `PokerDice-1.0.0.zip` из [релиза](../../releases/latest), распаковать и запустить `PokerDice.exe`.
+Скачать `PokerDice-1.1.0.zip` из [релиза](../../releases/latest), распаковать и запустить `PokerDice.exe`.
 Нужен [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) для Windows x64.
 
 ## Возможности
